@@ -1,251 +1,284 @@
-from typing import Dict, List, Optional
-from crewai import Agent
-from datetime import datetime
-import os
-from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
-from langchain.schema import HumanMessage
+from typing import Dict, Any, List, Optional
+from crewai import Agent, Task, Crew
 from .eligibility_agent import EligibilityAgent
-import logging
-
-# Load environment variables
-load_dotenv()
+from ..repositories.data_repository import DataRepository
+import os
+from dotenv import load_dotenv, find_dotenv
+from langchain_openai import ChatOpenAI
 
 class ManagerAgent:
-    """
-    Supervisor/Manager Agent that coordinates other specialized agents.
+    """Agent responsible for managing and coordinating benefits analysis tasks."""
     
-    This agent orchestrates the interaction between different specialized agents,
-    maintains conversation context, and makes high-level decisions about which
-    agents to engage for different types of queries.
-    """
-    
-    def __init__(self) -> None:
+    def __init__(self):
+        """Initialize the ManagerAgent."""
+        # Load environment variables
+        load_dotenv(find_dotenv())
+        
+        # Get API key and print debug info
         openai_api_key = os.getenv("OPENAI_API_KEY")
+        print(f"Debug - Manager Agent - API Key exists: {bool(openai_api_key)}")
+        print(f"Debug - Manager Agent - API Key length: {len(openai_api_key) if openai_api_key else 0}")
+        print(f"Debug - Manager Agent - Current working directory: {os.getcwd()}")
+        
         if not openai_api_key:
             raise ValueError("OPENAI_API_KEY environment variable is not set")
+        
+        # Initialize eligibility agent
+        self.eligibility_agent = EligibilityAgent()
+        
+        # Initialize the base Agent
+        self.agent = Agent(
+            role='Benefits Manager',
+            goal='Coordinate and manage benefits analysis tasks',
+            backstory="""You are a senior benefits manager with expertise in coordinating
+            complex benefits scenarios. You work with specialized agents to provide
+            comprehensive benefits analysis and recommendations. You ensure all responses
+            are well-structured and include clear eligibility status, recommendations,
+            and action items.""",
+            allow_delegation=True,
+            llm=ChatOpenAI(
+                model="gpt-3.5-turbo",
+                temperature=0,
+                api_key=openai_api_key
+            )
+        )
+    
+    async def analyze_query(self, employee_id: str, query: str) -> Dict[str, Any]:
+        """
+        Analyze a benefits query by coordinating with specialized agents.
+        
+        Args:
+            employee_id: The ID of the employee.
+            query: The benefits query to analyze.
             
-        self.llm = ChatOpenAI(
-            model="gpt-3.5-turbo",
-            temperature=0.7,
-            openai_api_key=openai_api_key
+        Returns:
+            Dict[str, Any]: Analysis results and recommendations.
+        """
+        # Create data repository instance
+        data_repo = DataRepository()
+        
+        # Get employee context and additional data
+        context = data_repo.get_chat_context(employee_id)
+        if not context.get("employee"):
+            return self._format_empty_response("Employee not found")
+            
+        # Get comprehensive employee profile
+        profile = data_repo.get_employee_profile(employee_id)
+        employee = profile.get("employee", {})
+        dob = employee.get("dob")
+        age = self._calculate_age(dob) if dob else "N/A"
+        dependents = profile.get("dependents", [])
+        claims = profile.get("claims", [])
+        life_events = profile.get("life_events", [])
+            
+        # Get health risk assessment
+        risk_assessment = data_repo.get_employee_risk_assessment(employee_id)
+        health_metrics = risk_assessment.get("metrics", {})
+        risk_factors = risk_assessment.get("risk_factors", [])
+        consent_status = risk_assessment.get("consent_status", "not_provided")
+        
+        # Get relevant policies
+        policies = data_repo.get_relevant_policies(query)
+        policy_details = policies[0]["policy_text"] if policies else "No specific policy details available."
+        
+        # Create analysis task
+        analysis_task = Task(
+            description=f"""
+            Analyze the following benefits query and provide comprehensive recommendations:
+            
+            Query: {query}
+            
+            Employee Profile:
+            - Name: {employee.get('name')}
+            - Age: {age} years old
+            - Email: {employee.get('email')}
+            - Dependents: {len(dependents)} registered
+            - Recent Claims: {len(claims)}
+            - Life Events: {len(life_events)}
+            
+            Current Benefits Status:
+            - HSA Eligible: {context['benefits_status'].get('hsa_eligible')}
+            - FSA Eligible: {context['benefits_status'].get('fsa_eligible')}
+            - COBRA Status: {context['benefits_status'].get('cobra_status')}
+            
+            Health Profile:
+            - Stress Level: {health_metrics.get('stress_level', 'N/A')}/10
+            - Sleep Hours: {health_metrics.get('sleep_hours', 'N/A')} hours/night
+            - Exercise: {health_metrics.get('exercise_minutes', 'N/A')} minutes/day
+            - Heart Rate: {health_metrics.get('heart_rate', 'N/A')} bpm
+            - Risk Factors: {', '.join(risk_factors) if risk_factors else 'None identified'}
+            - Health Data Consent: {consent_status}
+            
+            Policy Details:
+            {policy_details}
+            
+            Previous Chat History:
+            {self._format_chat_history(context['chat_history'])}
+            
+            Please provide a comprehensive analysis with the following sections:
+            
+            Eligibility Status:
+            [Provide current eligibility status, citing specific policy requirements that are met, including age and dependent considerations]
+            
+            Health Profile Impact:
+            [Analyze how the employee's health metrics and risk factors influence HSA benefits utilization]
+            
+            Recommendations:
+            - [List specific recommendations, incorporating all health metrics]
+            - [Include contribution strategies based on age and dependent status]
+            - [Reference specific policy guidelines and IRS limits]
+            - [Include wellness program integration suggestions]
+            
+            Action Items:
+            - [List specific actions with deadlines]
+            - [Include documentation requirements from policy]
+            - [Specify health data consent requirements if needed]
+            - [Detail wellness program enrollment steps if applicable]
+            
+            Make sure to reference specific details from all available data points in your response.
+            Highlight any areas where additional information might be beneficial.
+            """,
+            agent=self.eligibility_agent
         )
         
-        # Initialize specialized agents
-        self.eligibility_agent = EligibilityAgent()
-        self.conversation_context = {}
+        # Create crew for analysis
+        crew = Crew(
+            agents=[self.agent, self.eligibility_agent],
+            tasks=[analysis_task]
+        )
         
-        # Initialize base agent properties
-        self.name = "Benefits Administration Manager"
-        self.role = "Senior benefits administration coordinator and decision maker"
-        self.goal = "Coordinate specialized agents and provide comprehensive benefits guidance"
-        self.backstory = """You are an experienced benefits administration manager with 
-        expertise in coordinating complex benefits scenarios. You excel at understanding 
-        user needs and directing queries to the appropriate specialized agents."""
-        self.verbose = True
-        self.allow_delegation = True
-    
-    async def execute(self, task: str) -> str:
-        """
-        Execute a task using the manager's capabilities.
-        
-        Args:
-            task: The task description or query to process.
-            
-        Returns:
-            str: The result of executing the task.
-        """
         try:
-            result = await self.route_query(task)
-            return str(result.get("response", "Unable to process the request."))
-        except Exception as e:
-            return f"Error processing request: {str(e)}"
-    
-    async def analyze_query(self, query: str) -> Dict[str, any]:
-        """
-        Analyze a user query and determine the appropriate agent(s) to handle it.
-        
-        Args:
-            query: The user's question or request about benefits.
-        
-        Returns:
-            Dict containing analysis results and recommended actions.
-        """
-        task = f"""As a Benefits Administration Manager, analyze this query and determine how to handle it:
-
-Query: {query}
-
-Analyze the query considering:
-1. Query Type: What type of benefits question is this? (e.g., HSA eligibility, FSA limits, COBRA coverage)
-2. Required Information: What additional information might be needed?
-3. Relevant Regulations: Are there specific IRS or DOL regulations to consider?
-4. Next Steps: What actions should be taken to address this query?
-
-Format your response exactly as follows:
-Query Type: [Specify the primary type of query - HSA, FSA, COBRA, etc.]
-Required Information: [List any missing information needed]
-Recommended Actions: [List specific steps to take]
-Additional Considerations: [Note any regulatory or special considerations]
-"""
-        messages = [HumanMessage(content=task)]
-        analysis = await self.llm.ainvoke(messages)
-        return self._parse_analysis_response(analysis.content)
-    
-    async def route_query(self, query: str, context: Optional[Dict] = None) -> Dict[str, any]:
-        """
-        Route a query to the appropriate agent(s) and aggregate responses.
-        
-        Args:
-            query: The user's question or request.
-            context: Optional conversation context from previous interactions.
-        
-        Returns:
-            Dict containing the aggregated response and any follow-up actions.
-        """
-        try:
-            logger = logging.getLogger(__name__)
-            logger.debug(f"Manager Agent received query: {query}")
+            # Execute analysis
+            result = crew.kickoff()
             
-            # Update conversation context
-            if context:
-                self.conversation_context.update(context)
-                logger.debug(f"Updated conversation context: {self.conversation_context}")
-            
-            # Analyze the query
-            logger.debug("Analyzing query...")
-            analysis = await self.analyze_query(query)
-            logger.debug(f"Query analysis result: {analysis}")
-            
-            # Route to appropriate agent based on analysis
-            if self._is_eligibility_query(analysis):
-                logger.info("Query identified as eligibility-related. Routing to EligibilityAgent...")
-                response = await self.eligibility_agent.analyze_benefits_scenario(query)
-                logger.debug(f"Received response from EligibilityAgent: {response}")
-                formatted_response = self._format_response(response, analysis)
-                logger.debug(f"Formatted final response: {formatted_response}")
-                return formatted_response
-            
-            # Default handling if no specific routing is determined
-            logger.info("No specific routing determined. Providing general guidance.")
-            return {
-                "response": {
-                    "message": "I need more specific information about your benefits question to provide accurate guidance.",
-                    "details": {
-                        "missing_info": analysis.get("required_information", "Please provide more details about your situation."),
-                        "considerations": analysis.get("additional_considerations", "")
-                    }
-                },
-                "context": {
-                    "query_type": analysis.get("query_type", "Unknown"),
-                    "additional_info_needed": analysis.get("required_information", "")
-                },
-                "next_steps": [
-                    "Please provide more details about your current benefits situation",
-                    "Specify any particular concerns or constraints",
-                    "Include relevant dates or deadlines"
+            # Save chat interaction
+            data_repo.save_chat_interaction(
+                employee_id=employee_id,
+                messages=[
+                    {"role": "user", "content": query},
+                    {"role": "assistant", "content": result}
                 ]
-            }
+            )
+            
+            # Format and return response
+            return self._format_response(result)
         except Exception as e:
-            logger.error(f"Error processing query: {str(e)}", exc_info=True)
-            return {
-                "response": {
-                    "message": "Error processing your request",
-                    "details": str(e)
-                },
-                "context": {"error": str(e)},
-                "next_steps": ["Please try again with more specific information"]
-            }
+            print(f"Error during analysis: {str(e)}")
+            return self._format_empty_response(f"Error during analysis: {str(e)}")
+            
+    def _calculate_age(self, dob_str: str) -> int:
+        """Calculate age from date of birth string."""
+        from datetime import datetime
+        try:
+            dob = datetime.strptime(dob_str, "%Y-%m-%d")
+            today = datetime.now()
+            age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+            return age
+        except:
+            return "N/A"
     
-    def _is_eligibility_query(self, analysis: Dict[str, any]) -> bool:
-        """Determine if a query should be routed to the EligibilityAgent."""
-        query_type = analysis.get("query_type", "").lower()
-        return any(term in query_type for term in ["eligibility", "hsa", "fsa", "cobra", "health savings", "flexible spending"])
+    def _format_chat_history(self, history: List[Dict[str, Any]]) -> str:
+        """
+        Format chat history for context.
+        
+        Args:
+            history: List of chat history records.
+            
+        Returns:
+            str: Formatted chat history string.
+        """
+        if not history:
+            return "No previous chat history"
+            
+        formatted_history = []
+        for record in history[-3:]:  # Only use last 3 interactions
+            chat_data = record.get("chat_history", [])
+            if isinstance(chat_data, str):
+                try:
+                    import json
+                    chat_data = json.loads(chat_data)
+                except:
+                    chat_data = []
+                    
+            for message in chat_data:
+                formatted_history.append(
+                    f"{message.get('role', 'unknown').title()}: {message.get('content', '')}"
+                )
+                
+        return "\n".join(formatted_history)
     
-    def _parse_analysis_response(self, analysis: str) -> Dict[str, any]:
-        """Parse the analysis response into structured data."""
-        lines = analysis.split('\n')
-        result = {
-            "query_type": "",
-            "required_information": "",
-            "recommended_actions": "",
-            "additional_considerations": "",
-            "raw_analysis": analysis
+    def _format_response(self, analysis_result: str) -> Dict[str, Any]:
+        """
+        Format the analysis result into a structured response.
+        
+        Args:
+            analysis_result: Raw analysis result.
+            
+        Returns:
+            Dict[str, Any]: Structured response.
+        """
+        # Extract key components from the analysis result
+        lines = analysis_result.strip().split("\n")
+        
+        message = ""
+        details = {
+            "eligibility_status": "",
+            "recommendations": [],
+            "action_items": []
         }
         
-        current_section = ""
+        current_section = None
+        
         for line in lines:
             line = line.strip()
-            if line.startswith("Query Type:"):
-                current_section = "query_type"
-                result[current_section] = line.replace("Query Type:", "").strip()
-            elif line.startswith("Required Information:"):
-                current_section = "required_information"
-                result[current_section] = line.replace("Required Information:", "").strip()
-            elif line.startswith("Recommended Actions:"):
-                current_section = "recommended_actions"
-                result[current_section] = line.replace("Recommended Actions:", "").strip()
-            elif line.startswith("Additional Considerations:"):
-                current_section = "additional_considerations"
-                result[current_section] = line.replace("Additional Considerations:", "").strip()
-            elif line and current_section:
-                result[current_section] += f"\n{line}"
+            if not line:
+                continue
+                
+            if "eligibility status:" in line.lower():
+                current_section = "eligibility"
+                continue
+            elif "recommendations:" in line.lower():
+                current_section = "recommendations"
+                continue
+            elif "action items:" in line.lower():
+                current_section = "actions"
+                continue
+                
+            if current_section == "eligibility":
+                details["eligibility_status"] += line + " "
+            elif current_section == "recommendations":
+                if line.startswith("-"):
+                    details["recommendations"].append(line[1:].strip())
+            elif current_section == "actions":
+                if line.startswith("-"):
+                    details["action_items"].append(line[1:].strip())
+            else:
+                message += line + " "
         
-        return result
-    
-    def _format_response(self, agent_response: Dict[str, any], analysis: Dict[str, any]) -> Dict[str, any]:
-        """Format the final response with context and additional information."""
-        # Ensure we have a valid response structure
-        if not isinstance(agent_response, dict):
-            response = {
-                "message": str(agent_response),
-                "details": {
-                    "eligibility_status": "",
-                    "recommendations": "",
-                    "action_items": "",
-                    "agent_interaction": "Manager Agent only - no specialized agent response"
-                }
-            }
-        else:
-            response = {
-                "message": agent_response.get("message", ""),
-                "details": {
-                    "eligibility_status": agent_response.get("details", {}).get("eligibility_status", ""),
-                    "recommendations": agent_response.get("details", {}).get("recommendations", ""),
-                    "action_items": agent_response.get("details", {}).get("action_items", ""),
-                    "agent_interaction": "Manager Agent routed to Eligibility Agent for detailed analysis"
-                }
-            }
-
-        # Extract action items from both the analysis and agent response
-        action_items = []
-        
-        # Add actions from the eligibility agent
-        if response["details"]["action_items"]:
-            actions = response["details"]["action_items"].split("\n")
-            action_items.extend([action.strip() for action in actions if action.strip()])
-        
-        # Add actions from the manager's analysis
-        if analysis.get("recommended_actions"):
-            manager_actions = analysis["recommended_actions"].split("\n")
-            action_items.extend([
-                f"[Manager] {action.strip()}" 
-                for action in manager_actions if action.strip()
-            ])
-        
-        # Ensure we have at least some next steps
-        if not action_items:
-            action_items = [
-                "[Manager] Review your benefits documentation",
-                "[Manager] Consult with your HR department about specific policies",
-                "[Manager] Consider scheduling a benefits consultation"
-            ]
-
+        # If no structured sections were found, use the entire text as the message
+        if not any(details.values()):
+            message = analysis_result.strip()
+            
         return {
-            "response": response,
-            "context": {
-                "query_type": analysis.get("query_type", ""),
-                "additional_considerations": analysis.get("additional_considerations", ""),
-                "processing_flow": "Manager Agent → Query Analysis → Eligibility Agent → Combined Response"
-            },
-            "next_steps": action_items
+            "message": message.strip(),
+            "details": details
+        }
+    
+    def _format_empty_response(self, message: str) -> Dict[str, Any]:
+        """
+        Format an empty response with an error message.
+        
+        Args:
+            message: Error message to include.
+            
+        Returns:
+            Dict[str, Any]: Empty response structure.
+        """
+        return {
+            "message": message,
+            "details": {
+                "eligibility_status": "",
+                "recommendations": [],
+                "action_items": []
+            }
         } 

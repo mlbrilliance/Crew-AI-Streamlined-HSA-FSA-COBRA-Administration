@@ -1,191 +1,376 @@
-from typing import Dict, List, Optional
-from datetime import datetime
+from typing import Dict, Any, List, Optional
+from crewai import Agent
+from ..repositories.data_repository import DataRepository
 import os
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 from langchain_openai import ChatOpenAI
-from langchain.schema import HumanMessage
-import logging
 
-# Load environment variables
-load_dotenv()
-
-class EligibilityAgent:
-    """
-    AI-powered agent for analyzing benefits eligibility and providing personalized recommendations.
+class EligibilityAgent(Agent):
+    """Agent responsible for analyzing benefits eligibility and providing recommendations."""
     
-    This agent uses LangChain to analyze complex scenarios,
-    evaluate multiple benefit options, and provide detailed recommendations based
-    on individual circumstances.
-    """
-    
-    def __init__(self) -> None:
+    def __init__(self):
+        """Initialize the EligibilityAgent."""
+        # Load environment variables
+        load_dotenv(find_dotenv())
+        
+        # Get API key and print debug info
         openai_api_key = os.getenv("OPENAI_API_KEY")
+        print(f"Debug - API Key exists: {bool(openai_api_key)}")
+        print(f"Debug - API Key length: {len(openai_api_key) if openai_api_key else 0}")
+        print(f"Debug - Current working directory: {os.getcwd()}")
+        print(f"Debug - Environment variables: {dict(os.environ)}")
+        
         if not openai_api_key:
             raise ValueError("OPENAI_API_KEY environment variable is not set")
             
-        self.llm = ChatOpenAI(
-            model="gpt-3.5-turbo",
-            temperature=0.7,
-            openai_api_key=openai_api_key
+        super().__init__(
+            role='Benefits Eligibility Specialist',
+            goal='Analyze employee benefits eligibility and provide accurate recommendations',
+            backstory="""You are an expert in employee benefits, particularly HSA, FSA, and COBRA.
+            You analyze employee situations and provide detailed recommendations based on their eligibility
+            and current circumstances. You always provide structured responses with clear sections for
+            eligibility status, recommendations, and action items.""",
+            allow_delegation=False,
+            llm=ChatOpenAI(
+                model="gpt-3.5-turbo",
+                temperature=0,
+                api_key=openai_api_key
+            )
         )
-        
-        # Initialize base agent properties
-        self.name = "Benefits Analysis Specialist"
-        self.role = "Expert benefits analyst specializing in HSA, FSA, and COBRA eligibility"
-        self.goal = "Analyze complex benefit scenarios and provide personalized recommendations"
-        self.backstory = """You are an expert benefits analyst with deep knowledge of 
-        healthcare benefits, tax implications, and federal regulations. You excel 
-        at analyzing complex scenarios and providing actionable recommendations."""
-        self.verbose = True
-        self.allow_delegation = False
     
-    async def execute(self, task: str) -> str:
+    async def analyze_benefits_scenario(self, employee_id: str, query: str) -> Dict[str, Any]:
         """
-        Execute a task using the agent's capabilities.
+        Analyze a benefits scenario for an employee and provide recommendations.
         
         Args:
-            task: The task description or scenario to analyze.
+            employee_id: The ID of the employee.
+            query: The specific benefits query or scenario to analyze.
             
         Returns:
-            str: The result of executing the task.
+            Dict[str, Any]: Analysis results including eligibility status and recommendations.
         """
-        try:
-            result = await self.analyze_benefits_scenario(task)
-            return str(result)
-        except Exception as e:
-            return f"Error analyzing benefits scenario: {str(e)}"
+        # Create data repository instance
+        data_repo = DataRepository()
+        
+        # Gather comprehensive employee data
+        profile = data_repo.get_employee_profile(employee_id)
+        if not profile:
+            return self._format_empty_response("Employee not found")
+            
+        # Get current benefits status
+        benefits_status = data_repo.get_employee_benefits_status(employee_id)
+        
+        # Get health risk assessment if available
+        risk_assessment = data_repo.get_employee_risk_assessment(employee_id)
+        
+        # Search for relevant policies
+        relevant_policies = data_repo.get_relevant_policies(query)
+        
+        # Analyze the scenario
+        analysis = await self._analyze_scenario(
+            query=query,
+            profile=profile,
+            benefits_status=benefits_status,
+            risk_assessment=risk_assessment,
+            relevant_policies=relevant_policies
+        )
+        
+        return analysis
     
-    async def analyze_benefits_scenario(self, scenario: str) -> Dict[str, any]:
-        """
-        Analyze a complex benefits scenario described in natural language.
-        
-        Args:
-            scenario: Natural language description of an individual's situation,
-                     including their health needs, financial situation, and current benefits.
-        
-        Returns:
-            Dict containing analysis results, recommendations, and explanations.
-        """
-        logger = logging.getLogger(__name__)
-        logger.debug(f"EligibilityAgent analyzing scenario: {scenario}")
-        
-        task = f"""As a Benefits Analysis Specialist, analyze this scenario and provide detailed HSA/FSA/COBRA recommendations:
-
-Scenario: {scenario}
-
-Please analyze considering:
-1. Eligibility Requirements:
-   - HDHP requirements and limits
-   - HSA/FSA contribution limits
-   - Special considerations for new employees
-2. Financial Optimization:
-   - Tax advantages and savings strategies
-   - Employer contribution coordination
-   - Long-term benefits maximization
-3. Compliance Requirements:
-   - IRS regulations and limits
-   - Required documentation
-   - Important deadlines
-
-Format your response exactly as follows:
-Situation Analysis: [Detailed analysis of the current situation]
-Eligibility Status: [Clear statement of eligibility and any requirements]
-Recommendations: [Specific, actionable recommendations with amounts and deadlines]
-Action Items: [Numbered list of specific steps to take]
-"""
-        logger.debug("Sending analysis request to LLM")
-        messages = [HumanMessage(content=task)]
-        analysis = await self.llm.ainvoke(messages)
-        logger.debug(f"Received raw analysis from LLM: {analysis.content}")
-        
-        parsed_response = self._parse_analysis_response(analysis.content)
-        logger.debug(f"Parsed analysis response: {parsed_response}")
-        
-        return parsed_response
-    
-    async def recommend_optimal_benefits(
+    async def _analyze_scenario(
         self,
-        profile: Dict[str, any]
-    ) -> Dict[str, any]:
+        query: str,
+        profile: Dict[str, Any],
+        benefits_status: Dict[str, Any],
+        risk_assessment: Dict[str, Any],
+        relevant_policies: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
         """
-        Provide personalized benefits recommendations based on individual profile.
+        Perform detailed analysis of the benefits scenario.
         
         Args:
-            profile: Dictionary containing:
-                - age: int
-                - income: float
-                - health_conditions: List[str]
-                - current_coverage: Dict
-                - family_status: str
-                - planned_medical_expenses: float
-        
+            query: The specific benefits query or scenario to analyze.
+            profile: Comprehensive employee profile data.
+            benefits_status: Current benefits eligibility status.
+            risk_assessment: Health risk assessment data.
+            relevant_policies: List of relevant policy documents.
+            
         Returns:
-            Dict containing personalized recommendations and explanations.
+            Dict[str, Any]: Detailed analysis results.
         """
-        task = self._create_recommendation_prompt(profile)
-        messages = [HumanMessage(content=task)]
-        recommendations = await self.llm.ainvoke(messages)
-        return self._parse_recommendations_response(recommendations.content)
-    
-    def _create_recommendation_prompt(self, profile: Dict[str, any]) -> str:
-        """Create a detailed prompt for benefits analysis."""
-        return f"""As a benefits specialist, analyze this individual's profile and provide optimal recommendations:
+        # Extract employee data
+        employee = profile.get("employee", {})
+        dob = employee.get("dob")
+        age = self._calculate_age(dob) if dob else "N/A"
+        dependents = profile.get("dependents", [])
+        claims = profile.get("claims", [])
+        life_events = profile.get("life_events", [])
+        
+        # Get health metrics
+        health_metrics = risk_assessment.get("metrics", {})
+        stress_level = health_metrics.get("stress_level", "N/A")
+        sleep_hours = health_metrics.get("sleep_hours", "N/A")
+        exercise_minutes = health_metrics.get("exercise_minutes", "N/A")
+        heart_rate = health_metrics.get("heart_rate", "N/A")
+        risk_factors = risk_assessment.get("risk_factors", [])
+        consent_status = risk_assessment.get("consent_status", "not_provided")
+        
+        # Get policy details
+        policy_details = relevant_policies[0]["policy_text"] if relevant_policies else "No specific policy details available."
+        
+        # Execute the analysis using the agent's capabilities
+        result = await self.execute(
+            task=f"""
+            Analyze the following benefits scenario and provide detailed recommendations:
+            
+            Query: {query}
+            
+            Employee Profile:
+            - Name: {employee.get('name')}
+            - Age: {age} years old
+            - Email: {employee.get('email')}
+            - Dependents: {len(dependents)} registered
+            - Recent Claims: {len(claims)}
+            - Life Events: {len(life_events)}
+            
+            Health Profile:
+            - Stress Level: {stress_level}/10
+            - Sleep Hours: {sleep_hours} hours/night
+            - Exercise: {exercise_minutes} minutes/day
+            - Heart Rate: {heart_rate} bpm
+            - Risk Factors: {', '.join(risk_factors) if risk_factors else 'None identified'}
+            - Health Data Consent: {consent_status}
+            
+            Current Benefits Status:
+            - HSA Eligible: {benefits_status.get('hsa_eligible')}
+            - FSA Eligible: {benefits_status.get('fsa_eligible')}
+            - COBRA Status: {benefits_status.get('cobra_status')}
+            
+            Policy Details:
+            {policy_details}
+            
+            Based on this comprehensive information, provide a detailed analysis with the following sections:
 
-Age: {profile.get('age')}
-Income: ${profile.get('income'):,.2f}
-Health Conditions: {', '.join(profile.get('health_conditions', []))}
-Current Coverage: {profile.get('current_coverage')}
-Family Status: {profile.get('family_status')}
-Planned Medical Expenses: ${profile.get('planned_medical_expenses'):,.2f}
+            Eligibility Status:
+            [Provide current eligibility status, citing specific policy requirements that are met, including age and dependent considerations]
 
-Provide comprehensive analysis including:
-1. Optimal benefit selection strategy
-2. HSA vs FSA recommendation with contribution amounts
-3. Potential tax savings calculations
-4. Risk analysis and coverage recommendations
-5. Specific action items prioritized by importance
-6. Long-term considerations and planning
-"""
+            Health Profile Impact:
+            [Analyze how the employee's health metrics and risk factors influence HSA benefits utilization]
+
+            Recommendations:
+            - [List specific recommendations, incorporating all health metrics]
+            - [Include contribution strategies based on age and dependent status]
+            - [Reference specific policy guidelines and IRS limits]
+            - [Include wellness program integration suggestions]
+
+            Action Items:
+            - [List specific actions with deadlines]
+            - [Include documentation requirements from policy]
+            - [Specify health data consent requirements if needed]
+            - [Detail wellness program enrollment steps if applicable]
+
+            Make sure to reference specific details from all available data points in your response.
+            Highlight any areas where additional information might be beneficial.
+            """
+        )
+        
+        # Parse and structure the analysis result
+        return self._format_response(result)
     
-    def _parse_analysis_response(self, analysis: str) -> Dict[str, any]:
-        """Parse the analysis response into structured data."""
-        sections = analysis.split('\n\n')
+    def _calculate_age(self, dob_str: str) -> int:
+        """Calculate age from date of birth string."""
+        from datetime import datetime
+        try:
+            dob = datetime.strptime(dob_str, "%Y-%m-%d")
+            today = datetime.now()
+            age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
+            return age
+        except:
+            return "N/A"
+    
+    def _create_analysis_context(
+        self,
+        query: str,
+        profile: Dict[str, Any],
+        benefits_status: Dict[str, Any],
+        risk_assessment: Dict[str, Any],
+        relevant_policies: List[Dict[str, Any]]
+    ) -> str:
+        """
+        Create a formatted context string for analysis.
         
-        # Initialize default values
-        situation = ""
-        eligibility = ""
-        recommendations = ""
-        actions = ""
+        Args:
+            query: The specific benefits query or scenario to analyze.
+            profile: Comprehensive employee profile data.
+            benefits_status: Current benefits eligibility status.
+            risk_assessment: Health risk assessment data.
+            relevant_policies: List of relevant policy documents.
+            
+        Returns:
+            str: Formatted context string.
+        """
+        employee = profile.get("employee", {})
+        dependents = profile.get("dependents", [])
+        claims = profile.get("claims", [])
+        life_events = profile.get("life_events", [])
         
-        # Parse each section
-        for section in sections:
-            if section.startswith("Situation Analysis:"):
-                situation = section.replace("Situation Analysis:", "").strip()
-            elif section.startswith("Eligibility Status:"):
-                eligibility = section.replace("Eligibility Status:", "").strip()
-            elif section.startswith("Recommendations:"):
-                recommendations = section.replace("Recommendations:", "").strip()
-            elif section.startswith("Action Items:"):
-                actions = section.replace("Action Items:", "").strip()
+        context = f"""
+        Employee Information:
+        - Name: {employee.get('name')}
+        - Email: {employee.get('email')}
+        - DOB: {employee.get('dob')}
         
-        # Format response according to the API schema
+        Current Benefits Status:
+        - HSA Eligible: {benefits_status.get('hsa_eligible', False)}
+        - FSA Eligible: {benefits_status.get('fsa_eligible', False)}
+        - COBRA Status: {benefits_status.get('cobra_status', 'not_applicable')}
+        
+        Dependents:
+{self._format_dependents(dependents)}
+
+        Recent Claims:
+        {self._format_claims(claims)}
+
+        Life Events:
+{self._format_life_events(life_events)}
+        
+        Health Risk Assessment:
+        {self._format_risk_assessment(risk_assessment)}
+        
+        Relevant Policies:
+        {self._format_policies(relevant_policies)}
+        """
+        
+        return context
+
+    def _format_dependents(self, dependents: List[Dict[str, Any]]) -> str:
+        """Format dependents information."""
+        if not dependents:
+            return "No dependents"
+            
+        return "\n".join([
+            f"- {dep.get('name')} ({dep.get('relationship')}), DOB: {dep.get('dob')}"
+            for dep in dependents
+        ])
+
+    def _format_claims(self, claims: List[Dict[str, Any]]) -> str:
+        """Format claims information."""
+        if not claims:
+            return "No recent claims"
+            
+        return "\n".join([
+            f"- {claim.get('date')}: {claim.get('type')} - {claim.get('description')} (${claim.get('amount', 0):.2f})"
+            for claim in claims
+        ])
+
+    def _format_life_events(self, events: List[Dict[str, Any]]) -> str:
+        """Format life events information."""
+        if not events:
+            return "No life events"
+            
+        return "\n".join([
+            f"- {event.get('event_date')}: {event.get('event_type')} - {event.get('dependent', 'N/A')}"
+            for event in events
+        ])
+
+    def _format_risk_assessment(self, assessment: Dict[str, Any]) -> str:
+        """Format risk assessment information."""
+        if not assessment:
+            return "No health risk assessment available"
+            
+        metrics = assessment.get("metrics", {})
+        risk_factors = assessment.get("risk_factors", [])
+        
+        return f"""
+        Metrics:
+        - Stress Level: {metrics.get('stress_level', 'N/A')}
+        - Sleep Hours: {metrics.get('sleep_hours', 'N/A')}
+        - Exercise Minutes: {metrics.get('exercise_minutes', 'N/A')}
+        - Heart Rate: {metrics.get('heart_rate', 'N/A')}
+        
+        Risk Factors: {', '.join(risk_factors) if risk_factors else 'None identified'}
+        """
+    
+    def _format_policies(self, policies: List[Dict[str, Any]]) -> str:
+        """Format policy information."""
+        if not policies:
+            return "No relevant policies found"
+            
+        return "\n".join([
+            f"- {policy.get('policy_name')} (Version {policy.get('version')})"
+            for policy in policies
+        ]) 
+    
+    def _format_response(self, analysis_result: str) -> Dict[str, Any]:
+        """
+        Format the analysis result into a structured response.
+        
+        Args:
+            analysis_result: Raw analysis result from the agent.
+            
+        Returns:
+            Dict[str, Any]: Structured analysis response.
+        """
+        # Extract key components from the analysis result
+        lines = analysis_result.strip().split("\n")
+        
+        eligibility_status = ""
+        recommendations = []
+        action_items = []
+        policy_considerations = []
+        
+        current_section = None
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+                
+            if "eligibility status" in line.lower():
+                current_section = "eligibility"
+                continue
+            elif "recommendations" in line.lower():
+                current_section = "recommendations"
+                continue
+            elif "action items" in line.lower():
+                current_section = "actions"
+                continue
+            elif "policy considerations" in line.lower():
+                current_section = "policies"
+                continue
+                
+            if current_section == "eligibility":
+                eligibility_status += line + " "
+            elif current_section == "recommendations":
+                if line.startswith("-"):
+                    recommendations.append(line[1:].strip())
+            elif current_section == "actions":
+                if line.startswith("-"):
+                    action_items.append(line[1:].strip())
+            elif current_section == "policies":
+                if line.startswith("-"):
+                    policy_considerations.append(line[1:].strip())
+        
         return {
-            "message": situation,
-            "details": {
-                "eligibility_status": eligibility,
-                "recommendations": recommendations,
-                "action_items": actions,
-                "source": "Eligibility Agent Analysis",
-                "analysis_type": "HSA/FSA/COBRA Eligibility Assessment"
-            }
+            "eligibility_status": eligibility_status.strip(),
+            "recommendations": recommendations,
+            "action_items": action_items,
+            "policy_considerations": policy_considerations
         }
     
-    def _parse_recommendations_response(self, recommendations: str) -> Dict[str, any]:
-        """Parse recommendations into structured data."""
+    def _format_empty_response(self, message: str) -> Dict[str, Any]:
+        """
+        Format an empty response with an error message.
+        
+        Args:
+            message: Error message to include.
+            
+        Returns:
+            Dict[str, Any]: Empty response structure.
+        """
         return {
-            "message": recommendations,
-            "details": {
-                "timestamp": datetime.now().isoformat(),
-                "confidence_level": "high"  # This would be determined by analysis
-            }
+            "eligibility_status": message,
+            "recommendations": [],
+            "action_items": [],
+            "policy_considerations": []
         } 

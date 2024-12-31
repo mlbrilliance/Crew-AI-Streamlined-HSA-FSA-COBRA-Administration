@@ -42,8 +42,8 @@ export const ChatWindow = () => {
     }
   };
 
-  const handleSend = () => {
-    if (!message.trim() || !isAuthenticated) return;
+  const handleSend = async () => {
+    if (!message.trim() || !isAuthenticated || !employee) return;
 
     const newMessage: ChatMessage = {
       id: Date.now().toString(),
@@ -55,8 +55,56 @@ export const ChatWindow = () => {
     setMessages([...messages, newMessage]);
     setMessage("");
 
-    // TODO: Send message to backend/API
-    // TODO: Handle assistant response
+    try {
+      const response = await fetch('http://localhost:8000/chat/message', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          employer_id: employee.employee_id,
+          message: message,
+          context: {
+            employee_id: employee.employee_id,
+            name: employee.name
+          },
+          timestamp: new Date().toISOString()
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to get response from assistant');
+      }
+
+      const data = await response.json();
+      
+      const assistantMessage: ChatMessage = {
+        id: Date.now().toString(),
+        text: data.message,
+        sender: "assistant",
+        timestamp: new Date(),
+        details: data.details,
+        suggestions: data.suggestions
+      };
+
+      setMessages(messages => [...messages, assistantMessage]);
+
+      // Save chat history
+      await chatService.saveHistory({
+        employee_id: employee.employee_id,
+        messages: [...messages, newMessage, assistantMessage],
+        timestamp: new Date(),
+      });
+    } catch (error) {
+      console.error('Error sending message:', error);
+      const errorMessage: ChatMessage = {
+        id: Date.now().toString(),
+        text: "Sorry, I encountered an error processing your request. Please try again.",
+        sender: "assistant",
+        timestamp: new Date(),
+      };
+      setMessages(messages => [...messages, errorMessage]);
+    }
   };
 
   const handleClear = () => {

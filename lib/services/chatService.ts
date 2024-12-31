@@ -1,11 +1,17 @@
 import { supabase } from '../supabase';
 
-export interface ChatMessage {
+export type ChatMessage = {
   id: string;
   text: string;
   sender: "user" | "assistant";
   timestamp: Date;
-}
+  details?: {
+    source?: string;
+    analysis_type?: string;
+    processing_flow?: string;
+  };
+  suggestions?: string[];
+};
 
 export interface ChatHistory {
   employee_id: string;
