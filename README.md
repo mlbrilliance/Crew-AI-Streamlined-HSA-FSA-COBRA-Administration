@@ -1,36 +1,74 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# HSA/FSA/COBRA Administration System
 
-## Getting Started
+An AI-powered benefits administration system using CrewAI agents for intelligent analysis and recommendations.
 
-First, run the development server:
+## Agent Hierarchy and Responsibilities
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+### 1. Supervisor Agent (Manager)
+The orchestrator of the entire agent ecosystem with the following responsibilities:
+- Acts as the coordinator between all specialized agents
+- Determines which agent(s) to engage based on user queries
+- Maintains conversation context and history
+- Aggregates and synthesizes responses from multiple agents
+- Makes final decisions when agents have conflicting recommendations
+- Manages database interactions through a unified interface
+- Prioritizes tasks and manages workflow between agents
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 2. Eligibility Agent
+Specializes in benefits eligibility analysis with these key functions:
+- Analyzes individual eligibility for HSA/FSA/COBRA
+- Queries Supabase for:
+  - Employee status and history
+  - Current benefit enrollments
+  - Previous eligibility determinations
+- Provides personalized recommendations
+- Updates eligibility status in database
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### 3. Compliance Agent
+Ensures regulatory compliance and proper documentation:
+- Monitors regulatory requirements
+- Validates benefit setups against IRS/DOL rules
+- Queries Supabase for:
+  - Compliance history
+  - Documentation status
+  - Required notifications/deadlines
+- Flags potential compliance issues
+- Maintains audit trails in database
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### 4. QA Agent
+Ensures quality and consistency across all recommendations:
+- Reviews recommendations from other agents
+- Validates data consistency
+- Performs fact-checking against:
+  - Current regulations
+  - Company policies
+  - Historical decisions in Supabase
+- Identifies potential errors or inconsistencies
+- Maintains quality metrics in database
 
-## Learn More
+## Implementation Status
 
-To learn more about Next.js, take a look at the following resources:
+- ✅ Eligibility Agent: Implemented and functional
+- 🔄 Compliance Agent: Planned for next phase
+- 🔄 Supervisor Agent: In planning
+- 🔄 QA Agent: In planning
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Database Integration
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The system integrates with Supabase for:
+- Real-time data synchronization
+- Conversation history tracking
+- Agent decision logging
+- Performance metrics
+- Audit trail maintenance
+- Caching frequently accessed data
 
-## Deploy on Vercel
+## Frontend Integration
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The NextJS frontend provides:
+- Interactive chat interface
+- Real-time status updates
+- Visual representation of agent activities
+- Detailed explanation of decisions
+- User feedback collection
+- Progress tracking for complex queries
