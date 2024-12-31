@@ -56,45 +56,61 @@ export const ChatWindow = () => {
     setMessage("");
 
     try {
-      const response = await fetch('http://localhost:8000/chat/message', {
+      const response = await fetch('http://localhost:8000/manager/analyze', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          employer_id: employee.employee_id,
-          message: message,
-          context: {
-            employee_id: employee.employee_id,
-            name: employee.name
-          },
-          timestamp: new Date().toISOString()
+          employee_id: employee.employee_id,
+          query: message
         }),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to get response from assistant');
+        const errorData = await response.json();
+        console.error('Server error:', errorData);
+        throw new Error(errorData.detail || 'Failed to get response from assistant');
       }
 
       const data = await response.json();
-      
+      console.log('Raw backend response:', JSON.stringify(data, null, 2));
+
+      // Ensure we have a valid response
+      if (!data.response?.message) {
+        throw new Error('Invalid response format from backend');
+      }
+
+      // Create the assistant message
       const assistantMessage: ChatMessage = {
         id: Date.now().toString(),
-        text: data.message,
+        text: data.response.message,  // Use the message directly
         sender: "assistant",
         timestamp: new Date(),
-        details: data.details,
-        suggestions: data.suggestions
+        details: {
+          recommendations: data.response?.details?.recommendations || [],
+          action_items: data.response?.details?.action_items || []
+        },
+        suggestions: data.next_steps || []
       };
 
-      setMessages(messages => [...messages, assistantMessage]);
+      // Update messages state
+      setMessages(prevMessages => [...prevMessages, assistantMessage]);
 
       // Save chat history
-      await chatService.saveHistory({
-        employee_id: employee.employee_id,
-        messages: [...messages, newMessage, assistantMessage],
-        timestamp: new Date(),
-      });
+      if (employee) {
+        const updatedMessages = [...messages, newMessage, assistantMessage];
+        try {
+          await chatService.saveHistory({
+            employee_id: employee.employee_id,
+            messages: updatedMessages,
+            timestamp: new Date(),
+          });
+        } catch (error) {
+          console.error('Error saving chat history:', error);
+          // Continue even if history save fails
+        }
+      }
     } catch (error) {
       console.error('Error sending message:', error);
       const errorMessage: ChatMessage = {
@@ -228,13 +244,56 @@ export const ChatWindow = () => {
                   }`}
                 >
                   <div
-                    className={`inline-block p-3 rounded-lg ${
+                    className={`inline-block p-3 rounded-lg max-w-[85%] ${
                       msg.sender === "user"
                         ? "bg-primary text-primary-foreground"
                         : "bg-muted"
                     }`}
                   >
-                    {msg.text}
+                    <div className="whitespace-pre-wrap">{msg.text}</div>
+                    {msg.sender === "assistant" && msg.details && (
+                      <div className="mt-4 text-sm space-y-2">
+                        {msg.details.recommendations && msg.details.recommendations.length > 0 && (
+                          <div className="space-y-1">
+                            <div className="font-medium text-primary">Pro Tips:</div>
+                            <div className="pl-4 space-y-1">
+                              {msg.details.recommendations.map((rec: string, idx: number) => (
+                                <div key={idx} className="flex items-start">
+                                  <span className="mr-2">•</span>
+                                  <span>{rec}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {msg.details.action_items && msg.details.action_items.length > 0 && (
+                          <div className="space-y-1">
+                            <div className="font-medium text-primary">Remember to:</div>
+                            <div className="pl-4 space-y-1">
+                              {msg.details.action_items.map((item: string, idx: number) => (
+                                <div key={idx} className="flex items-start">
+                                  <span className="mr-2">•</span>
+                                  <span>{item}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {msg.sender === "assistant" && msg.suggestions && msg.suggestions.length > 0 && (
+                      <div className="mt-4 text-sm">
+                        <div className="font-medium text-primary mb-1">To get started:</div>
+                        <div className="pl-4 space-y-1">
+                          {msg.suggestions.map((step: string, idx: number) => (
+                            <div key={idx} className="flex items-start">
+                              <span className="mr-2">{idx + 1}.</span>
+                              <span>{step}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                   <div className="text-xs text-muted-foreground mt-1">
                     {new Date(msg.timestamp).toLocaleTimeString()}

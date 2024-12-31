@@ -9,6 +9,8 @@ export type ChatMessage = {
     source?: string;
     analysis_type?: string;
     processing_flow?: string;
+    recommendations?: string[];
+    action_items?: string[];
   };
   suggestions?: string[];
 };

@@ -1,5 +1,6 @@
 from typing import Dict, Any
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from .agents.manager_agent import ManagerAgent
 from .agents.eligibility_agent import EligibilityAgent
@@ -7,6 +8,7 @@ import os
 from dotenv import load_dotenv, find_dotenv
 import traceback
 import logging
+from typing import List, Dict, Any, Optional
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -30,6 +32,15 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],  # Allow frontend origin
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all methods
+    allow_headers=["*"],  # Allow all headers
+)
+
 class BenefitsQuery(BaseModel):
     """Model for benefits query requests."""
     employee_id: str
@@ -40,6 +51,18 @@ class AnalyzeRequest(BaseModel):
     employee_id: str
     query: str
 
+class ResponseDetails(BaseModel):
+    recommendations: List[str] = []
+    action_items: List[str] = []
+
+class ResponseMessage(BaseModel):
+    message: str
+    details: ResponseDetails
+
+class AnalyzeResponse(BaseModel):
+    response: ResponseMessage
+    next_steps: List[str] = []
+
 @app.get("/")
 async def root() -> Dict[str, str]:
     """Root endpoint returning service information."""
@@ -49,29 +72,31 @@ async def root() -> Dict[str, str]:
         "status": "running"
     }
 
-@app.post("/manager/analyze")
-async def analyze_with_manager(query: BenefitsQuery) -> Dict[str, Any]:
+@app.post("/manager/analyze", response_model=AnalyzeResponse)
+async def analyze_with_manager(request: AnalyzeRequest) -> AnalyzeResponse:
     """
     Analyze a benefits query using the Manager Agent.
     
     Args:
-        query: The benefits query containing employee ID and question.
+        request: AnalyzeRequest containing employee_id and query
         
     Returns:
-        Dict[str, Any]: Analysis results and recommendations.
+        AnalyzeResponse containing the structured response with message, details, and next steps
     """
     try:
         logger.debug("Creating ManagerAgent instance")
         manager = ManagerAgent()
         
-        logger.debug(f"Analyzing query for employee {query.employee_id}: {query.query}")
+        logger.debug(f"Analyzing query for employee {request.employee_id}: {request.query}")
         result = await manager.analyze_query(
-            employee_id=query.employee_id,
-            query=query.query
+            employee_id=request.employee_id,
+            query=request.query
         )
         logger.debug(f"Analysis result: {result}")
         
+        # Return the result directly - it already has the correct structure
         return result
+        
     except Exception as e:
         logger.error(f"Error analyzing query: {str(e)}")
         logger.error(f"Traceback: {traceback.format_exc()}")
