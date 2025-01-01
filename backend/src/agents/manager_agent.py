@@ -96,6 +96,12 @@ class ManagerAgent:
                 - FSA Eligible: {profile['employee'].get('fsa_eligible', 'Unknown')}
                 - HSA Eligible: {profile['employee'].get('hsa_eligible', 'Unknown')}
                 - COBRA Status: {profile['employee'].get('cobra_status', 'Unknown')}
+                - Dependents: {', '.join([f"{d.get('name')} ({d.get('relationship')})" for d in profile['employee'].get('dependents', [])])}
+                
+                Benefits Status:
+                - Current Claims: {len(profile.get('claims', []))} active claims
+                - Recent Life Events: {len(profile.get('life_events', []))} events in the past year
+                - Wellness Program Status: Active participant with {len(profile.get('wellness_data', []))} recorded metrics
 
                 Question: {query}
 
@@ -103,23 +109,27 @@ class ManagerAgent:
 
                 You MUST format your response exactly like this:
                 
-                Thought: [Your analysis of the situation]
+                Thought: [Your analysis of the situation based on their specific profile and data]
                 
-                Reasoning: [Your explanation of the approach]
+                Reasoning: [Your explanation that references their specific eligibility status and history]
                 
                 Final Answer: {greeting}[Your detailed response that MUST:
-                - Use their name
-                - Reference their benefits status
-                - Provide specific details about HSA/FSA differences
-                - Include relevant policy information
-                - Be conversational but professional]
+                1. Start by acknowledging their specific situation (e.g. "I see you're currently FSA eligible" or "Based on your COBRA status")
+                2. Reference their specific benefits status and any relevant history
+                3. Mention any relevant dependent information if applicable
+                4. Provide specific details about their HSA/FSA eligibility
+                5. Include relevant policy information
+                6. Be conversational but professional
+                7. Reference any relevant life events or claims if applicable]
 
                 IMPORTANT:
                 1. NEVER respond with "I understand your query" or any similar generic phrase
-                2. ALWAYS provide specific information based on their eligibility status
-                3. ALWAYS include detailed comparisons when discussing HSA vs FSA
-                4. ALWAYS make the response personal to their situation
-                5. ALWAYS format exactly as shown above with Thought, Reasoning, and Final Answer sections
+                2. ALWAYS start by referencing their specific data from Supabase
+                3. ALWAYS provide specific information based on their eligibility status
+                4. ALWAYS include detailed comparisons when discussing HSA vs FSA
+                5. ALWAYS make the response personal to their situation
+                6. ALWAYS format exactly as shown above with Thought, Reasoning, and Final Answer sections
+                7. ALWAYS mention relevant life events or claims if they exist
                 """
 
                 # Create and execute the task
@@ -146,6 +156,9 @@ class ManagerAgent:
                 # Extract the final answer
                 if "Final Answer:" in processed_response:
                     final_answer = processed_response.split("Final Answer:")[1].strip()
+                    # Remove the prompt instructions if they are present
+                    if "[Your detailed response that MUST:" in final_answer:
+                        final_answer = final_answer.split("[Your detailed response that MUST:")[0].strip()
                     print(f"Debug - Found Final Answer: {final_answer}")
                     processed_response = final_answer
                 elif "Thought:" in processed_response:
@@ -155,11 +168,16 @@ class ManagerAgent:
                     if "Reasoning:" in processed_response:
                         sections = processed_response.split("Reasoning:")
                         processed_response = sections[-1].strip()
+                    # Remove the prompt instructions if they are present
+                    if "[Your detailed response that MUST:" in processed_response:
+                        processed_response = processed_response.split("[Your detailed response that MUST:")[0].strip()
                     print(f"Debug - Extracted response from sections: {processed_response}")
                 else:
                     # Fallback: Use the raw response but ensure it's not just "I understand"
+                    if "[Your detailed response that MUST:" in processed_response:
+                        processed_response = processed_response.split("[Your detailed response that MUST:")[0].strip()
                     processed_response = processed_response if not processed_response.startswith("I understand") else """
-                    Based on your question about HSA and FSA differences, let me explain the key distinctions:
+                    Based on your question about HSA and FSA differences, let me explain the key differences:
                     
                     1. Ownership: HSAs are owned by you and stay with you even if you change jobs, while FSAs are owned by your employer
                     2. Rollover: HSA funds roll over year to year, while FSA funds typically must be used within the plan year
@@ -182,10 +200,24 @@ class ManagerAgent:
                         "message": processed_response.strip(),
                         "details": {
                             "recommendations": recommendations,
-                            "action_items": action_items
+                            "action_items": action_items,
+                            "employee_context": {
+                                "fsa_eligible": profile['employee'].get('fsa_eligible', False),
+                                "hsa_eligible": profile['employee'].get('hsa_eligible', False),
+                                "cobra_status": profile['employee'].get('cobra_status', 'Unknown'),
+                                "has_dependents": len(profile['employee'].get('dependents', [])) > 0,
+                                "active_claims": len(profile.get('claims', [])),
+                                "recent_life_events": len(profile.get('life_events', [])),
+                                "wellness_data": bool(profile.get('wellness_data', []))
+                            }
                         }
                     },
-                    "next_steps": next_steps
+                    "next_steps": next_steps,
+                    "context": {
+                        "employee_name": employee.get('name', 'User'),
+                        "processing_flow": "Personalized Response",
+                        "data_sources": ["Employee Profile", "Benefits Status", "Claims History", "Life Events"]
+                    }
                 }
                 
                 print(f"Debug - Final structured response: {json.dumps(final_response, indent=2)}")

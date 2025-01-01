@@ -240,7 +240,9 @@ class DataRepository:
                     "timestamp": None,
                     "metrics": {},
                     "risk_factors": [],
-                    "recommendations": []
+                    "recommendations": [],
+                    "consent_status": "unknown",
+                    "data_source": "none"
                 }
             
             wellness_data = response.data[0]
@@ -250,36 +252,42 @@ class DataRepository:
             # Generate recommendations based on metrics
             recommendations = []
             
-            # Check stress level
-            stress_level = metrics.get('stress_level')
-            if stress_level and stress_level > 6:
+            # Check heart rate
+            heart_rate = metrics.get('heart_rate', 0)
+            if heart_rate > 80:
                 recommendations.append({
-                    "category": "stress_management",
-                    "message": "Your stress levels are elevated. Consider stress management techniques like meditation or speaking with a counselor."
+                    "category": "heart_health",
+                    "message": "Your resting heart rate is elevated. Consider cardiovascular exercise and stress reduction techniques."
                 })
             
             # Check sleep
-            sleep_hours = metrics.get('sleep_hours')
-            if sleep_hours and sleep_hours < 7:
+            sleep_hours = metrics.get('sleep_hours', 0)
+            if sleep_hours < 7:
                 recommendations.append({
                     "category": "sleep_improvement",
                     "message": "You're getting less than recommended sleep. Try to establish a regular sleep schedule and aim for 7-9 hours per night."
                 })
             
-            # Check exercise
-            exercise_minutes = metrics.get('exercise_minutes')
-            if exercise_minutes and exercise_minutes < 30:
+            # Check activity level
+            exercise_minutes = metrics.get('exercise_minutes', 0)
+            daily_steps = metrics.get('daily_steps', 0)
+            if exercise_minutes < 30:
                 recommendations.append({
                     "category": "exercise",
                     "message": "Consider increasing your daily physical activity. Aim for at least 30 minutes of moderate exercise most days."
                 })
-            
-            # Check steps
-            steps = metrics.get('steps')
-            if steps and steps < 8000:
+            if daily_steps < 8000:
                 recommendations.append({
                     "category": "activity",
                     "message": "Try to increase your daily step count. A goal of 10,000 steps per day can improve overall health."
+                })
+            
+            # Check stress level
+            stress_level = metrics.get('stress_level', 0)
+            if stress_level > 6:
+                recommendations.append({
+                    "category": "stress_management",
+                    "message": "Your stress levels are elevated. Consider stress management techniques like meditation or speaking with a counselor."
                 })
             
             print(f"\nGenerated {len(recommendations)} recommendations")
@@ -288,7 +296,9 @@ class DataRepository:
                 "timestamp": wellness_data.get('timestamp'),
                 "metrics": metrics,
                 "risk_factors": risk_factors,
-                "recommendations": recommendations
+                "recommendations": recommendations,
+                "consent_status": wellness_data.get('consent_status', 'pending'),
+                "data_source": wellness_data.get('data_source', 'none')
             }
             
         except Exception as e:
@@ -302,7 +312,9 @@ class DataRepository:
                 "timestamp": None,
                 "metrics": {},
                 "risk_factors": [],
-                "recommendations": []
+                "recommendations": [],
+                "consent_status": "unknown",
+                "data_source": "none"
             }
     
     def get_relevant_policies(self, query: str) -> List[Dict[str, Any]]:
@@ -545,3 +557,167 @@ class DataRepository:
             print(f"Employee ID: {employee_id}")
             print(f"Messages: {messages}")
             return False 
+    
+    def _calculate_deadline(self, event_date: str, days: int) -> str:
+        """
+        Calculate deadline date from event date.
+        
+        Args:
+            event_date: The date of the event.
+            days: Number of days to add.
+            
+        Returns:
+            str: Deadline date in ISO format.
+        """
+        try:
+            from datetime import datetime, timedelta
+            event_dt = datetime.fromisoformat(event_date.replace('Z', '+00:00'))
+            deadline = event_dt + timedelta(days=days)
+            return deadline.isoformat()
+        except Exception as e:
+            print(f"Error calculating deadline: {str(e)}")
+            return None
+            
+    def get_life_event_recommendations(self, employee_id: str) -> Dict[str, Any]:
+        """
+        Get recommendations based on employee's recent life events.
+        
+        Args:
+            employee_id: The ID of the employee.
+            
+        Returns:
+            Dict[str, Any]: Life event analysis and recommendations including:
+                - recent_events: List of recent life events
+                - benefit_impacts: How events affect benefits
+                - required_actions: Actions employee needs to take
+                - documentation_needed: Required documentation
+        """
+        try:
+            print(f"\n=== Getting life event recommendations for employee {employee_id} ===")
+            
+            # Get recent life events
+            print("\nFetching recent life events from Supabase...")
+            response = self.supabase.table('mock_life_events') \
+                .select('*') \
+                .eq('employee_id', employee_id) \
+                .order('event_date', desc=True) \
+                .limit(5) \
+                .execute()
+                
+            print(f"\nLife events response: {response.data}")
+            
+            if not response.data:
+                print("No life events found")
+                return {
+                    "recent_events": [],
+                    "benefit_impacts": [],
+                    "required_actions": [],
+                    "documentation_needed": []
+                }
+            
+            recent_events = response.data
+            benefit_impacts = []
+            required_actions = []
+            documentation_needed = []
+            
+            # Analyze each life event
+            for event in recent_events:
+                event_type = event.get('event_type', '').lower()
+                event_date = event.get('event_date')
+                
+                # Marriage event
+                if event_type == 'marriage':
+                    benefit_impacts.append({
+                        "event_type": "Marriage",
+                        "impact": "Qualifies for Special Enrollment Period - can modify health coverage"
+                    })
+                    required_actions.append({
+                        "event_type": "Marriage",
+                        "action": "Update benefits elections within 30 days of marriage",
+                        "deadline": self._calculate_deadline(event_date, 30)
+                    })
+                    documentation_needed.append({
+                        "event_type": "Marriage",
+                        "documents": ["Marriage certificate", "Spouse's social security number"]
+                    })
+                
+                # Birth/Adoption
+                elif event_type in ['birth', 'adoption']:
+                    benefit_impacts.append({
+                        "event_type": event_type.capitalize(),
+                        "impact": "Qualifies for Special Enrollment Period - can add dependent to health coverage"
+                    })
+                    required_actions.append({
+                        "event_type": event_type.capitalize(),
+                        "action": f"Add dependent to benefits within 30 days of {event_type}",
+                        "deadline": self._calculate_deadline(event_date, 30)
+                    })
+                    docs = ["Birth certificate"] if event_type == 'birth' else ["Adoption papers"]
+                    documentation_needed.append({
+                        "event_type": event_type.capitalize(),
+                        "documents": docs + ["Dependent's social security number"]
+                    })
+                
+                # Job status change
+                elif event_type == 'job_status_change':
+                    status = event.get('details', {}).get('new_status', '').lower()
+                    if status == 'terminated':
+                        benefit_impacts.append({
+                            "event_type": "Employment Termination",
+                            "impact": "COBRA eligibility begins - can continue health coverage"
+                        })
+                        required_actions.append({
+                            "event_type": "Employment Termination",
+                            "action": "Elect COBRA coverage if desired",
+                            "deadline": self._calculate_deadline(event_date, 60)
+                        })
+                    elif status == 'part_time':
+                        benefit_impacts.append({
+                            "event_type": "Part-time Status",
+                            "impact": "May affect benefits eligibility - review current elections"
+                        })
+                        required_actions.append({
+                            "event_type": "Part-time Status",
+                            "action": "Review and adjust benefits if needed",
+                            "deadline": self._calculate_deadline(event_date, 30)
+                        })
+                
+                # Address change
+                elif event_type == 'address_change':
+                    benefit_impacts.append({
+                        "event_type": "Address Change",
+                        "impact": "May affect health network coverage area"
+                    })
+                    required_actions.append({
+                        "event_type": "Address Change",
+                        "action": "Verify current providers are in-network at new location",
+                        "deadline": self._calculate_deadline(event_date, 30)
+                    })
+                    documentation_needed.append({
+                        "event_type": "Address Change",
+                        "documents": ["Proof of residence", "Updated contact information"]
+                    })
+            
+            result = {
+                "recent_events": recent_events,
+                "benefit_impacts": benefit_impacts,
+                "required_actions": required_actions,
+                "documentation_needed": documentation_needed
+            }
+            
+            print(f"\nGenerated recommendations: {result}")
+            return result
+            
+        except Exception as e:
+            print(f"\n=== Error in get_life_event_recommendations ===")
+            print(f"Error type: {type(e).__name__}")
+            print(f"Error message: {str(e)}")
+            print(f"Employee ID: {employee_id}")
+            
+            # Return empty results on error
+            return {
+                "recent_events": [],
+                "benefit_impacts": [],
+                "required_actions": [],
+                "documentation_needed": []
+            } 
