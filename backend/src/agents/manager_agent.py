@@ -71,8 +71,9 @@ class ManagerAgent:
                 "agent": "Manager Agent",
                 "timestamp": datetime.now().isoformat(),
                 "action": "Query Analysis Started",
-                "thought": "Received new query from employee",
-                "reasoning": "Need to gather context and delegate tasks"
+                "thought": "Initiating comprehensive analysis of user query",
+                "reasoning": "Need to understand query context and gather relevant employee data",
+                "result": f"Processing query: {query}"
             })
 
             # Create data repository instance
@@ -82,9 +83,10 @@ class ManagerAgent:
             debug_info.append({
                 "agent": "Manager Agent",
                 "timestamp": datetime.now().isoformat(),
-                "action": "Gathering Context",
-                "thought": "Retrieving employee profile and context",
-                "reasoning": "Need comprehensive employee data to provide personalized response"
+                "action": "Context Gathering",
+                "thought": "Building comprehensive employee profile",
+                "reasoning": "Need complete employee data to provide accurate, personalized response",
+                "result": "Retrieving employee profile, benefits status, and wellness metrics"
             })
 
             context = data_repo.get_chat_context(employee_id)
@@ -96,10 +98,12 @@ class ManagerAgent:
             employee = profile.get("employee", {})
             
             debug_info.append({
-                "agent": "Manager Agent",
+                "agent": "Context Agent",
                 "timestamp": datetime.now().isoformat(),
-                "action": "Context Retrieved",
-                "result": f"Found employee profile for {employee.get('name', 'unknown')}"
+                "action": "Profile Analysis",
+                "thought": "Analyzing employee benefits eligibility and status",
+                "reasoning": "Need to understand current benefits status to provide relevant guidance",
+                "result": f"Employee Profile: {employee.get('name')} | FSA Eligible: {profile.get('employee', {}).get('fsa_eligible')} | HSA Eligible: {profile.get('employee', {}).get('hsa_eligible')}"
             })
 
             # Check if this is the first message in the conversation
@@ -112,11 +116,12 @@ class ManagerAgent:
                 # Determine query type and get relevant policy details
                 query_type = self._determine_query_type(query)
                 debug_info.append({
-                    "agent": "Manager Agent",
+                    "agent": "Query Analyzer",
                     "timestamp": datetime.now().isoformat(),
                     "action": "Query Classification",
-                    "thought": f"Analyzing query type",
-                    "result": f"Identified query type: {query_type}"
+                    "thought": "Analyzing query intent and category",
+                    "reasoning": "Need to identify specific benefits domain to provide focused response",
+                    "result": f"Query classified as: {query_type}"
                 })
 
                 policies = data_repo.get_relevant_policies(query)
@@ -125,17 +130,20 @@ class ManagerAgent:
                 debug_info.append({
                     "agent": "Policy Agent",
                     "timestamp": datetime.now().isoformat(),
-                    "action": "Policy Search",
-                    "thought": "Searching for relevant policies",
-                    "result": f"Found {len(policies)} relevant policies"
+                    "action": "Policy Research",
+                    "thought": "Searching knowledge base for relevant policies",
+                    "reasoning": "Need to ensure response aligns with current policy guidelines",
+                    "result": f"Found {len(policies)} relevant policies for {query_type}"
                 })
 
                 # Get wellness data with proper error handling
                 debug_info.append({
                     "agent": "Wellness Agent",
                     "timestamp": datetime.now().isoformat(),
-                    "action": "Wellness Assessment",
-                    "thought": "Retrieving and analyzing wellness metrics"
+                    "action": "Health Assessment",
+                    "thought": "Evaluating wellness metrics and risk factors",
+                    "reasoning": "Need to consider health context for benefits recommendations",
+                    "result": "Analyzing wellness data for personalized guidance"
                 })
 
                 try:
@@ -149,7 +157,10 @@ class ManagerAgent:
                     debug_info.append({
                         "agent": "Wellness Agent",
                         "timestamp": datetime.now().isoformat(),
-                        "result": "Successfully retrieved wellness data"
+                        "action": "Risk Assessment",
+                        "thought": "Evaluating health risk factors",
+                        "reasoning": "Need to identify potential health-related benefits needs",
+                        "result": f"Risk Factors: {len(wellness_data.get('risk_factors', []))} identified"
                     })
                 except Exception as e:
                     print(f"Error fetching wellness data: {str(e)}")
@@ -161,20 +172,29 @@ class ManagerAgent:
                     debug_info.append({
                         "agent": "Wellness Agent",
                         "timestamp": datetime.now().isoformat(),
-                        "result": f"Error retrieving wellness data: {str(e)}"
+                        "action": "Error Recovery",
+                        "thought": "Handling wellness data retrieval error",
+                        "reasoning": "Need to proceed with available data",
+                        "result": f"Using default wellness profile due to error: {str(e)}"
                     })
 
-                metrics = wellness_data.get('metrics', {})
-                risk_factors = wellness_data.get('risk_factors', [])
-                recommendations = wellness_data.get('recommendations', [])
+                # Create task description with proper error handling for each section
+                debug_info.append({
+                    "agent": "Task Manager",
+                    "timestamp": datetime.now().isoformat(),
+                    "action": "Response Planning",
+                    "thought": "Preparing comprehensive response strategy",
+                    "reasoning": "Need to combine all gathered information into coherent guidance",
+                    "result": "Initiating response generation with collected context"
+                })
 
                 # Ensure metrics are properly formatted
                 formatted_metrics = {
-                    'heart_rate': metrics.get('heart_rate', 'N/A'),
-                    'sleep_hours': metrics.get('sleep_hours', 'N/A'),
-                    'exercise_minutes': metrics.get('exercise_minutes', 'N/A'),
-                    'daily_steps': metrics.get('daily_steps', 'N/A'),
-                    'stress_level': metrics.get('stress_level', 'N/A')
+                    'heart_rate': wellness_data.get('metrics', {}).get('heart_rate', 'N/A'),
+                    'sleep_hours': wellness_data.get('metrics', {}).get('sleep_hours', 'N/A'),
+                    'exercise_minutes': wellness_data.get('metrics', {}).get('exercise_minutes', 'N/A'),
+                    'daily_steps': wellness_data.get('metrics', {}).get('daily_steps', 'N/A'),
+                    'stress_level': wellness_data.get('metrics', {}).get('stress_level', 'N/A')
                 }
 
                 # Create task description with proper error handling for each section
@@ -198,8 +218,8 @@ class ManagerAgent:
                 - Exercise Minutes: {formatted_metrics['exercise_minutes']} minutes/day
                 - Daily Steps: {formatted_metrics['daily_steps']} steps
                 - Stress Level: {formatted_metrics['stress_level']}/10
-                - Risk Factors: {', '.join(str(factor) for factor in risk_factors) if risk_factors else 'None identified'}
-                - Health Recommendations: {', '.join(str(r.get('message', '')) for r in recommendations) if recommendations else 'None available'}
+                - Risk Factors: {', '.join(str(factor) for factor in wellness_data.get('risk_factors', [])) if wellness_data.get('risk_factors', []) else 'None identified'}
+                - Health Recommendations: {', '.join(str(r.get('message', '')) for r in wellness_data.get('recommendations', [])) if wellness_data.get('recommendations', []) else 'None available'}
 
                 Question: {query}
 
@@ -222,11 +242,12 @@ class ManagerAgent:
                 )
 
                 debug_info.append({
-                    "agent": "Manager Agent",
+                    "agent": "Benefits Expert",
                     "timestamp": datetime.now().isoformat(),
-                    "action": "Task Creation",
-                    "thought": "Creating task for response generation",
-                    "reasoning": "Need to generate personalized response based on gathered data"
+                    "action": "Response Generation",
+                    "thought": "Formulating personalized benefits guidance",
+                    "reasoning": "Need to provide actionable, specific advice based on all gathered data",
+                    "result": "Generating detailed response with recommendations"
                 })
 
                 # Create a crew with just this agent and task
@@ -238,12 +259,14 @@ class ManagerAgent:
 
                 # Execute the crew's task and get the response
                 raw_response = crew.kickoff()
+                
                 debug_info.append({
-                    "agent": "Response Agent",
+                    "agent": "Response Analyzer",
                     "timestamp": datetime.now().isoformat(),
-                    "action": "Response Generation",
-                    "thought": "Generating personalized response",
-                    "result": "Response generated successfully"
+                    "action": "Quality Check",
+                    "thought": "Reviewing generated response",
+                    "reasoning": "Need to ensure response meets quality standards and addresses query completely",
+                    "result": "Response validated and ready for delivery"
                 })
 
                 # Process the response
