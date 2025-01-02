@@ -1,3 +1,16 @@
+"""
+Manager Agent Module
+
+Responsible for orchestrating the multi-agent system and coordinating benefits analysis tasks.
+
+Developer:
+- Name: Nick Sudh
+- Website: mlbrilliance.com
+- GitHub: https://github.com/mlbrilliance
+- Twitter: https://x.com/mlbrilliance
+- BlueSky: https://bsky.app/profile/mlbrilliance.com
+"""
+
 from typing import Dict, Any, List, Optional
 from crewai import Agent, Task, Crew
 from .eligibility_agent import EligibilityAgent

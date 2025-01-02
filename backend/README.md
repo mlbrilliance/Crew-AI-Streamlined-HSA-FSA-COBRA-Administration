@@ -2,6 +2,13 @@
 
 The backend service for the Benefits Administration system, powered by CrewAI and OpenAI for intelligent benefits analysis and recommendations.
 
+## Developer
+- **Name**: Nick Sudh
+- **Website**: [mlbrilliance.com](http://www.mlbrilliance.com)
+- **GitHub**: [@mlbrilliance](https://github.com/mlbrilliance)
+- **Twitter**: [@mlbrilliance](https://x.com/mlbrilliance)
+- **BlueSky**: [@mlbrilliance](https://bsky.app/profile/mlbrilliance.com)
+
 ## Features
 
 ### Multi-Agent System

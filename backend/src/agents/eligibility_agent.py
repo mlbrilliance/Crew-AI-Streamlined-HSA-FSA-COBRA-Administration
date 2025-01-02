@@ -1,3 +1,16 @@
+"""
+Eligibility Agent Module
+
+Specialized agent for analyzing benefits eligibility and providing personalized recommendations.
+
+Developer:
+- Name: Nick Sudh
+- Website: mlbrilliance.com
+- GitHub: https://github.com/mlbrilliance
+- Twitter: https://x.com/mlbrilliance
+- BlueSky: https://bsky.app/profile/mlbrilliance.com
+"""
+
 from typing import Dict, Any, List, Optional
 from crewai import Agent
 from ..repositories.data_repository import DataRepository

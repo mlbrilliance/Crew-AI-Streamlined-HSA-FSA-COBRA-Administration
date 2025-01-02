@@ -2,6 +2,13 @@
 
 An AI-powered benefits administration system using CrewAI agents for intelligent analysis and recommendations. The system provides real-time, personalized guidance on benefits-related queries through a sophisticated multi-agent architecture.
 
+## Developer
+- **Name**: Nick Sudh
+- **Website**: [mlbrilliance.com](http://www.mlbrilliance.com)
+- **GitHub**: [@mlbrilliance](https://github.com/mlbrilliance)
+- **Twitter**: [@mlbrilliance](https://x.com/mlbrilliance)
+- **BlueSky**: [@mlbrilliance](https://bsky.app/profile/mlbrilliance.com)
+
 ## Features
 
 ### Interactive Chat Interface

@@ -1,3 +1,16 @@
+"""
+Benefits Administration Backend
+
+A FastAPI backend service for the Benefits Administration system, powered by CrewAI and OpenAI.
+
+Developer:
+- Name: Nick Sudh
+- Website: mlbrilliance.com
+- GitHub: https://github.com/mlbrilliance
+- Twitter: https://x.com/mlbrilliance
+- BlueSky: https://bsky.app/profile/mlbrilliance.com
+"""
+
 from typing import Dict, Any
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
