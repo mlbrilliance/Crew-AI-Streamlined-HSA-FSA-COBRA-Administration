@@ -87,21 +87,59 @@ class ManagerAgent:
                 policies = data_repo.get_relevant_policies(query)
                 policy_details = policies[0]["policy_text"] if policies else ""
 
-                # Create task description
+                # Get wellness data with proper error handling
+                try:
+                    wellness_data = data_repo.get_employee_risk_assessment(employee_id)
+                    if not wellness_data:
+                        wellness_data = {
+                            'metrics': {},
+                            'risk_factors': [],
+                            'recommendations': []
+                        }
+                except Exception as e:
+                    print(f"Error fetching wellness data: {str(e)}")
+                    wellness_data = {
+                        'metrics': {},
+                        'risk_factors': [],
+                        'recommendations': []
+                    }
+
+                metrics = wellness_data.get('metrics', {})
+                risk_factors = wellness_data.get('risk_factors', [])
+                recommendations = wellness_data.get('recommendations', [])
+
+                # Ensure metrics are properly formatted
+                formatted_metrics = {
+                    'heart_rate': metrics.get('heart_rate', 'N/A'),
+                    'sleep_hours': metrics.get('sleep_hours', 'N/A'),
+                    'exercise_minutes': metrics.get('exercise_minutes', 'N/A'),
+                    'daily_steps': metrics.get('daily_steps', 'N/A'),
+                    'stress_level': metrics.get('stress_level', 'N/A')
+                }
+
+                # Create task description with proper error handling for each section
                 task_description = f"""
                 Answer the following benefits question for {employee.get('name', 'the user')}.
 
                 Employee Profile:
                 - Name: {employee.get('name', 'the user')}
-                - FSA Eligible: {profile['employee'].get('fsa_eligible', 'Unknown')}
-                - HSA Eligible: {profile['employee'].get('hsa_eligible', 'Unknown')}
-                - COBRA Status: {profile['employee'].get('cobra_status', 'Unknown')}
-                - Dependents: {', '.join([f"{d.get('name')} ({d.get('relationship')})" for d in profile['employee'].get('dependents', [])])}
+                - FSA Eligible: {profile.get('employee', {}).get('fsa_eligible', 'Unknown')}
+                - HSA Eligible: {profile.get('employee', {}).get('hsa_eligible', 'Unknown')}
+                - COBRA Status: {profile.get('employee', {}).get('cobra_status', 'Unknown')}
+                - Dependents: {', '.join([f"{d.get('name', '')} ({d.get('relationship', '')})" for d in profile.get('employee', {}).get('dependents', [])])}
                 
                 Benefits Status:
                 - Current Claims: {len(profile.get('claims', []))} active claims
                 - Recent Life Events: {len(profile.get('life_events', []))} events in the past year
-                - Wellness Program Status: Active participant with {len(profile.get('wellness_data', []))} recorded metrics
+                
+                Wellness Data:
+                - Heart Rate: {formatted_metrics['heart_rate']} bpm
+                - Sleep Hours: {formatted_metrics['sleep_hours']} hours/night
+                - Exercise Minutes: {formatted_metrics['exercise_minutes']} minutes/day
+                - Daily Steps: {formatted_metrics['daily_steps']} steps
+                - Stress Level: {formatted_metrics['stress_level']}/10
+                - Risk Factors: {', '.join(str(factor) for factor in risk_factors) if risk_factors else 'None identified'}
+                - Health Recommendations: {', '.join(str(r.get('message', '')) for r in recommendations) if recommendations else 'None available'}
 
                 Question: {query}
 
@@ -111,25 +149,9 @@ class ManagerAgent:
                 
                 Thought: [Your analysis of the situation based on their specific profile and data]
                 
-                Reasoning: [Your explanation that references their specific eligibility status and history]
+                Reasoning: [Your explanation that references their specific eligibility status, wellness metrics, and history]
                 
-                Final Answer: {greeting}[Your detailed response that MUST:
-                1. Start by acknowledging their specific situation (e.g. "I see you're currently FSA eligible" or "Based on your COBRA status")
-                2. Reference their specific benefits status and any relevant history
-                3. Mention any relevant dependent information if applicable
-                4. Provide specific details about their HSA/FSA eligibility
-                5. Include relevant policy information
-                6. Be conversational but professional
-                7. Reference any relevant life events or claims if applicable]
-
-                IMPORTANT:
-                1. NEVER respond with "I understand your query" or any similar generic phrase
-                2. ALWAYS start by referencing their specific data from Supabase
-                3. ALWAYS provide specific information based on their eligibility status
-                4. ALWAYS include detailed comparisons when discussing HSA vs FSA
-                5. ALWAYS make the response personal to their situation
-                6. ALWAYS format exactly as shown above with Thought, Reasoning, and Final Answer sections
-                7. ALWAYS mention relevant life events or claims if they exist
+                Final Answer: {greeting}[Your detailed response that addresses their specific situation]
                 """
 
                 # Create and execute the task
@@ -153,93 +175,76 @@ class ManagerAgent:
                 # Process the response
                 processed_response = str(raw_response).strip()
                 
-                # Extract the final answer
-                if "Final Answer:" in processed_response:
-                    final_answer = processed_response.split("Final Answer:")[1].strip()
-                    # Remove the prompt instructions if they are present
-                    if "[Your detailed response that MUST:" in final_answer:
-                        final_answer = final_answer.split("[Your detailed response that MUST:")[0].strip()
-                    print(f"Debug - Found Final Answer: {final_answer}")
-                    processed_response = final_answer
-                elif "Thought:" in processed_response:
-                    # If we have Thought but no Final Answer, take everything after the last section
-                    sections = processed_response.split("Thought:")
-                    processed_response = sections[-1].strip()
-                    if "Reasoning:" in processed_response:
-                        sections = processed_response.split("Reasoning:")
+                # Extract the final answer with better error handling
+                try:
+                    if "Final Answer:" in processed_response:
+                        final_answer = processed_response.split("Final Answer:")[1].strip()
+                        if "[Your detailed response that addresses their specific situation]" in final_answer:
+                            final_answer = final_answer.split("[Your detailed response that addresses their specific situation]")[0].strip()
+                        processed_response = final_answer
+                    elif "Thought:" in processed_response:
+                        sections = processed_response.split("Thought:")
                         processed_response = sections[-1].strip()
-                    # Remove the prompt instructions if they are present
-                    if "[Your detailed response that MUST:" in processed_response:
-                        processed_response = processed_response.split("[Your detailed response that MUST:")[0].strip()
-                    print(f"Debug - Extracted response from sections: {processed_response}")
-                else:
-                    # Fallback: Use the raw response but ensure it's not just "I understand"
-                    if "[Your detailed response that MUST:" in processed_response:
-                        processed_response = processed_response.split("[Your detailed response that MUST:")[0].strip()
-                    processed_response = processed_response if not processed_response.startswith("I understand") else """
-                    Based on your question about HSA and FSA differences, let me explain the key differences:
+                        if "Reasoning:" in processed_response:
+                            sections = processed_response.split("Reasoning:")
+                            processed_response = sections[-1].strip()
                     
-                    1. Ownership: HSAs are owned by you and stay with you even if you change jobs, while FSAs are owned by your employer
-                    2. Rollover: HSA funds roll over year to year, while FSA funds typically must be used within the plan year
-                    3. Contribution Changes: HSA contributions can be changed anytime, FSA contributions are usually fixed for the year
-                    4. Eligibility: HSAs require a high-deductible health plan (HDHP), FSAs don't have this requirement
-                    5. Account Combinations: HSAs can be used with Limited Purpose FSAs, but not with standard FSAs
-                    
-                    Please check your specific plan details for more information about your options.
-                    """
-                    print(f"Debug - Using fallback response: {processed_response}")
-                
-                # Get query-specific recommendations and steps
+                    # If we still have placeholder text, provide a default response
+                    if "[Your" in processed_response or "Your final answer must be:" in processed_response:
+                        # Create a default response based on the wellness data
+                        metrics = wellness_data.get('metrics', {})
+                        risk_factors = wellness_data.get('risk_factors', [])
+                        
+                        response_parts = []
+                        response_parts.append(f"Based on your wellness data, here's a summary of your health metrics:")
+                        
+                        if metrics:
+                            if metrics.get('heart_rate'):
+                                response_parts.append(f"- Your heart rate is {metrics['heart_rate']} bpm")
+                            if metrics.get('sleep_hours'):
+                                response_parts.append(f"- You're getting {metrics['sleep_hours']} hours of sleep per night")
+                            if metrics.get('exercise_minutes'):
+                                response_parts.append(f"- You're exercising {metrics['exercise_minutes']} minutes per day")
+                            if metrics.get('daily_steps'):
+                                response_parts.append(f"- You're taking {metrics['daily_steps']} steps daily")
+                            if metrics.get('stress_level'):
+                                response_parts.append(f"- Your stress level is {metrics['stress_level']}/10")
+                        
+                        if risk_factors:
+                            response_parts.append("\nIdentified risk factors:")
+                            for factor in risk_factors:
+                                response_parts.append(f"- {factor}")
+                        
+                        processed_response = "\n".join(response_parts)
+                        
+                except Exception as e:
+                    print(f"Error processing response: {str(e)}")
+                    processed_response = "Based on your wellness data, I recommend scheduling a check-up to review your health metrics and discuss personalized improvement strategies with a healthcare provider."
+
+                # Get recommendations and format response
                 recommendations = self._get_recommendations(query, profile)
                 action_items = self._get_action_items(query, profile)
                 next_steps = self._get_next_steps(query, profile)
                 
-                # Structure the final response
-                final_response = {
+                # Ensure the response is a dictionary with the required structure
+                return {
                     "response": {
-                        "message": processed_response.strip(),
+                        "message": processed_response,
                         "details": {
                             "recommendations": recommendations,
                             "action_items": action_items,
-                            "employee_context": {
-                                "fsa_eligible": profile['employee'].get('fsa_eligible', False),
-                                "hsa_eligible": profile['employee'].get('hsa_eligible', False),
-                                "cobra_status": profile['employee'].get('cobra_status', 'Unknown'),
-                                "has_dependents": len(profile['employee'].get('dependents', [])) > 0,
-                                "active_claims": len(profile.get('claims', [])),
-                                "recent_life_events": len(profile.get('life_events', [])),
-                                "wellness_data": bool(profile.get('wellness_data', []))
-                            }
+                            "next_steps": next_steps
                         }
-                    },
-                    "next_steps": next_steps,
-                    "context": {
-                        "employee_name": employee.get('name', 'User'),
-                        "processing_flow": "Personalized Response",
-                        "data_sources": ["Employee Profile", "Benefits Status", "Claims History", "Life Events"]
                     }
                 }
                 
-                print(f"Debug - Final structured response: {json.dumps(final_response, indent=2)}")
-                
-                # Save the interaction
-                data_repo.save_chat_interaction(
-                    employee_id=employee_id,
-                    messages=[
-                        {"role": "user", "content": query},
-                        {"role": "assistant", "content": processed_response}
-                    ]
-                )
-                
-                return final_response
-                
             except Exception as e:
-                print(f"Error executing agent task: {str(e)}")
+                print(f"Error in analyze_query inner try block: {str(e)}")
                 return self._format_empty_response(f"Error processing request: {str(e)}")
-            
+                
         except Exception as e:
-            print(f"Error in analyze_query: {str(e)}")
-            return self._format_empty_response(str(e))
+            print(f"Error in analyze_query outer try block: {str(e)}")
+            return self._format_empty_response("Sorry, I encountered an error processing your request. Please try again.")
             
     def _determine_query_type(self, query: str) -> str:
         """Determine the type of query based on keywords."""
@@ -283,31 +288,77 @@ class ManagerAgent:
     def _get_recommendations(self, query: str, profile: Dict) -> List[str]:
         """Generate personalized recommendations based on the query and profile."""
         query = query.upper()
+        
+        # Get wellness data
+        wellness_data = profile.get('wellness_data', {})
+        metrics = wellness_data.get('metrics', {})
+        
+        # Initialize recommendations list
+        recommendations = []
+        
+        # Add wellness-specific recommendations if relevant
+        if "WELLNESS" in query or "HEALTH" in query:
+            try:
+                # Convert metrics to integers for comparison, using 0 as default
+                heart_rate = int(metrics.get('heart_rate', 0))
+                sleep_hours = int(metrics.get('sleep_hours', 0))
+                exercise_minutes = int(metrics.get('exercise_minutes', 0))
+                daily_steps = int(metrics.get('daily_steps', 0))
+                stress_level = int(metrics.get('stress_level', 0))
+                
+                if heart_rate > 80:
+                    recommendations.append(
+                        "Your heart rate is elevated. Consider incorporating more cardiovascular exercise and stress reduction techniques."
+                    )
+                if sleep_hours < 7:
+                    recommendations.append(
+                        "You're getting less than the recommended amount of sleep. Try to establish a regular sleep schedule aiming for 7-9 hours."
+                    )
+                if exercise_minutes < 30:
+                    recommendations.append(
+                        "Increase your daily physical activity to at least 30 minutes of moderate exercise most days."
+                    )
+                if daily_steps < 8000:
+                    recommendations.append(
+                        "Try to increase your daily step count. A goal of 10,000 steps per day can improve overall health."
+                    )
+                if stress_level > 6:
+                    recommendations.append(
+                        "Your stress levels are elevated. Consider stress management techniques like meditation or counseling."
+                    )
+            except (ValueError, TypeError):
+                # If any conversion fails, add a generic recommendation
+                recommendations.append(
+                    "Consider scheduling a wellness check-up to establish your baseline health metrics."
+                )
+                
+        # Add FSA-specific recommendations
         if "FSA" in query and "REIMBURSEMENT" in query:
-            return [
+            recommendations.extend([
                 "Take photos of receipts immediately after purchases to avoid losing them",
                 "Set up direct deposit for faster reimbursement processing",
                 "Keep a digital backup of all submitted receipts and claim forms",
                 "Consider using your FSA debit card for instant payment when available",
                 "Create a folder system to organize receipts by date and category"
-            ]
+            ])
         elif "FSA" in query and "CONTRIBUTION" in query:
-            return [
+            recommendations.extend([
                 f"Review your annual healthcare expenses to optimize contribution amount (up to $3,200 for 2024)",
                 "Consider upcoming medical procedures when setting contribution amount",
                 "Remember the use-it-or-lose-it rule when planning contributions",
                 "Check if your plan offers a grace period or carryover option",
                 "Set up monthly expense tracking to stay within your FSA budget"
-            ]
+            ])
         elif "FSA" in query:
-            return [
+            recommendations.extend([
                 "Keep a list of FSA-eligible expenses for reference",
                 "Save receipts for all healthcare-related purchases",
                 "Download your FSA administrator's mobile app for easy access",
                 "Review your FSA balance regularly",
                 "Plan major medical expenses around your FSA cycle"
-            ]
-        return []
+            ])
+            
+        return recommendations
 
     def _get_action_items(self, query: str, profile: Dict) -> List[str]:
         """Generate specific action items based on the query and profile."""
