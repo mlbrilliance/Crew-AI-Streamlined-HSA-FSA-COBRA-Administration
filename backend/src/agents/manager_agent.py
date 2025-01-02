@@ -6,6 +6,8 @@ import os
 from dotenv import load_dotenv, find_dotenv
 from langchain_openai import ChatOpenAI
 import json
+from datetime import datetime
+import re
 
 class ManagerAgent:
     """Agent responsible for managing and coordinating benefits analysis tasks."""
@@ -63,10 +65,28 @@ class ManagerAgent:
             Dict[str, Any]: Analysis results and recommendations.
         """
         try:
+            # Initialize debug info list
+            debug_info = []
+            debug_info.append({
+                "agent": "Manager Agent",
+                "timestamp": datetime.now().isoformat(),
+                "action": "Query Analysis Started",
+                "thought": "Received new query from employee",
+                "reasoning": "Need to gather context and delegate tasks"
+            })
+
             # Create data repository instance
             data_repo = DataRepository()
             
             # Get employee context and additional data
+            debug_info.append({
+                "agent": "Manager Agent",
+                "timestamp": datetime.now().isoformat(),
+                "action": "Gathering Context",
+                "thought": "Retrieving employee profile and context",
+                "reasoning": "Need comprehensive employee data to provide personalized response"
+            })
+
             context = data_repo.get_chat_context(employee_id)
             if not context.get("employee"):
                 return self._format_empty_response("Employee not found")
@@ -75,6 +95,13 @@ class ManagerAgent:
             profile = data_repo.get_employee_profile(employee_id)
             employee = profile.get("employee", {})
             
+            debug_info.append({
+                "agent": "Manager Agent",
+                "timestamp": datetime.now().isoformat(),
+                "action": "Context Retrieved",
+                "result": f"Found employee profile for {employee.get('name', 'unknown')}"
+            })
+
             # Check if this is the first message in the conversation
             chat_history = context.get("chat_history", [])
             is_first_message = len(chat_history) == 0
@@ -84,10 +111,33 @@ class ManagerAgent:
                 
                 # Determine query type and get relevant policy details
                 query_type = self._determine_query_type(query)
+                debug_info.append({
+                    "agent": "Manager Agent",
+                    "timestamp": datetime.now().isoformat(),
+                    "action": "Query Classification",
+                    "thought": f"Analyzing query type",
+                    "result": f"Identified query type: {query_type}"
+                })
+
                 policies = data_repo.get_relevant_policies(query)
                 policy_details = policies[0]["policy_text"] if policies else ""
 
+                debug_info.append({
+                    "agent": "Policy Agent",
+                    "timestamp": datetime.now().isoformat(),
+                    "action": "Policy Search",
+                    "thought": "Searching for relevant policies",
+                    "result": f"Found {len(policies)} relevant policies"
+                })
+
                 # Get wellness data with proper error handling
+                debug_info.append({
+                    "agent": "Wellness Agent",
+                    "timestamp": datetime.now().isoformat(),
+                    "action": "Wellness Assessment",
+                    "thought": "Retrieving and analyzing wellness metrics"
+                })
+
                 try:
                     wellness_data = data_repo.get_employee_risk_assessment(employee_id)
                     if not wellness_data:
@@ -96,6 +146,11 @@ class ManagerAgent:
                             'risk_factors': [],
                             'recommendations': []
                         }
+                    debug_info.append({
+                        "agent": "Wellness Agent",
+                        "timestamp": datetime.now().isoformat(),
+                        "result": "Successfully retrieved wellness data"
+                    })
                 except Exception as e:
                     print(f"Error fetching wellness data: {str(e)}")
                     wellness_data = {
@@ -103,6 +158,11 @@ class ManagerAgent:
                         'risk_factors': [],
                         'recommendations': []
                     }
+                    debug_info.append({
+                        "agent": "Wellness Agent",
+                        "timestamp": datetime.now().isoformat(),
+                        "result": f"Error retrieving wellness data: {str(e)}"
+                    })
 
                 metrics = wellness_data.get('metrics', {})
                 risk_factors = wellness_data.get('risk_factors', [])
@@ -161,6 +221,14 @@ class ManagerAgent:
                     agent=self.agent
                 )
 
+                debug_info.append({
+                    "agent": "Manager Agent",
+                    "timestamp": datetime.now().isoformat(),
+                    "action": "Task Creation",
+                    "thought": "Creating task for response generation",
+                    "reasoning": "Need to generate personalized response based on gathered data"
+                })
+
                 # Create a crew with just this agent and task
                 crew = Crew(
                     agents=[self.agent],
@@ -170,81 +238,35 @@ class ManagerAgent:
 
                 # Execute the crew's task and get the response
                 raw_response = crew.kickoff()
-                print(f"Debug - Raw response from agent: {raw_response}")
+                debug_info.append({
+                    "agent": "Response Agent",
+                    "timestamp": datetime.now().isoformat(),
+                    "action": "Response Generation",
+                    "thought": "Generating personalized response",
+                    "result": "Response generated successfully"
+                })
 
                 # Process the response
                 processed_response = str(raw_response).strip()
                 
-                # Extract the final answer with better error handling
-                try:
-                    if "Final Answer:" in processed_response:
-                        final_answer = processed_response.split("Final Answer:")[1].strip()
-                        if "[Your detailed response that addresses their specific situation]" in final_answer:
-                            final_answer = final_answer.split("[Your detailed response that addresses their specific situation]")[0].strip()
-                        processed_response = final_answer
-                    elif "Thought:" in processed_response:
-                        sections = processed_response.split("Thought:")
-                        processed_response = sections[-1].strip()
-                        if "Reasoning:" in processed_response:
-                            sections = processed_response.split("Reasoning:")
-                            processed_response = sections[-1].strip()
-                    
-                    # If we still have placeholder text, provide a default response
-                    if "[Your" in processed_response or "Your final answer must be:" in processed_response:
-                        # Create a default response based on the wellness data
-                        metrics = wellness_data.get('metrics', {})
-                        risk_factors = wellness_data.get('risk_factors', [])
-                        
-                        response_parts = []
-                        response_parts.append(f"Based on your wellness data, here's a summary of your health metrics:")
-                        
-                        if metrics:
-                            if metrics.get('heart_rate'):
-                                response_parts.append(f"- Your heart rate is {metrics['heart_rate']} bpm")
-                            if metrics.get('sleep_hours'):
-                                response_parts.append(f"- You're getting {metrics['sleep_hours']} hours of sleep per night")
-                            if metrics.get('exercise_minutes'):
-                                response_parts.append(f"- You're exercising {metrics['exercise_minutes']} minutes per day")
-                            if metrics.get('daily_steps'):
-                                response_parts.append(f"- You're taking {metrics['daily_steps']} steps daily")
-                            if metrics.get('stress_level'):
-                                response_parts.append(f"- Your stress level is {metrics['stress_level']}/10")
-                        
-                        if risk_factors:
-                            response_parts.append("\nIdentified risk factors:")
-                            for factor in risk_factors:
-                                response_parts.append(f"- {factor}")
-                        
-                        processed_response = "\n".join(response_parts)
-                        
-                except Exception as e:
-                    print(f"Error processing response: {str(e)}")
-                    processed_response = "Based on your wellness data, I recommend scheduling a check-up to review your health metrics and discuss personalized improvement strategies with a healthcare provider."
-
-                # Get recommendations and format response
-                recommendations = self._get_recommendations(query, profile)
-                action_items = self._get_action_items(query, profile)
-                next_steps = self._get_next_steps(query, profile)
+                # Format the response with debug info
+                formatted_response = self._format_response(processed_response, debug_info)
                 
-                # Ensure the response is a dictionary with the required structure
-                return {
-                    "response": {
-                        "message": processed_response,
-                        "details": {
-                            "recommendations": recommendations,
-                            "action_items": action_items,
-                            "next_steps": next_steps
-                        }
-                    }
-                }
+                return formatted_response
                 
             except Exception as e:
-                print(f"Error in analyze_query inner try block: {str(e)}")
+                print(f"Error in analyze_query: {str(e)}")
+                debug_info.append({
+                    "agent": "Manager Agent",
+                    "timestamp": datetime.now().isoformat(),
+                    "action": "Error Handling",
+                    "result": f"Error: {str(e)}"
+                })
                 return self._format_empty_response(f"Error processing request: {str(e)}")
                 
         except Exception as e:
-            print(f"Error in analyze_query outer try block: {str(e)}")
-            return self._format_empty_response("Sorry, I encountered an error processing your request. Please try again.")
+            print(f"Error in analyze_query: {str(e)}")
+            return self._format_empty_response(f"Error processing request: {str(e)}")
             
     def _determine_query_type(self, query: str) -> str:
         """Determine the type of query based on keywords."""
@@ -389,10 +411,10 @@ class ManagerAgent:
             ]
         return []
 
-    def _get_next_steps(self, query: str, profile: Dict) -> List[str]:
-        """Generate next steps based on the query and profile."""
-        query = query.upper()
-        if "FSA" in query and "REIMBURSEMENT" in query:
+    def _get_next_steps(self, text: str) -> List[str]:
+        """Generate next steps based on the query text."""
+        text = text.upper()
+        if "FSA" in text and "REIMBURSEMENT" in text:
             return [
                 "Access your FSA account portal or mobile app",
                 "Select the reimbursement claim option",
@@ -400,7 +422,7 @@ class ManagerAgent:
                 "Review all information for accuracy",
                 "Submit your claim and save the confirmation"
             ]
-        elif "FSA" in query and "CONTRIBUTION" in query:
+        elif "FSA" in text and "CONTRIBUTION" in text:
             return [
                 "Log into your benefits portal",
                 "Navigate to FSA settings",
@@ -408,7 +430,7 @@ class ManagerAgent:
                 "Provide any required documentation",
                 "Submit your request for approval"
             ]
-        elif "FSA" in query:
+        elif "FSA" in text:
             return [
                 "Review your FSA plan details",
                 "Check your current balance",
@@ -416,7 +438,15 @@ class ManagerAgent:
                 "Gather necessary documentation",
                 "Contact FSA administrator with questions"
             ]
-        return []
+        elif "HSA" in text:
+            return [
+                "Review your HSA plan details",
+                "Check your current balance",
+                "Consider your contribution strategy",
+                "Review investment options if available",
+                "Contact HSA administrator with questions"
+            ]
+        return ["Schedule a benefits consultation for personalized guidance"]
     
     def _calculate_age(self, dob_str: str) -> int:
         """Calculate age from date of birth string."""
@@ -429,73 +459,59 @@ class ManagerAgent:
         except:
             return "N/A"
     
-    def _format_response(self, analysis_result: str) -> Dict[str, Any]:
+    def _format_response(self, analysis_result: str, debug_info: List[Dict] = None) -> Dict[str, Any]:
         """
         Format the analysis result into a structured response.
         
         Args:
-            analysis_result: Raw analysis result.
+            analysis_result: Raw analysis result string.
+            debug_info: List of debug entries from agents.
             
         Returns:
-            Dict[str, Any]: Structured response.
+            Dict[str, Any]: Formatted response with message, details, and next steps.
         """
-        # Extract key components from the analysis result
-        lines = analysis_result.strip().split("\n")
+        # Extract components using string parsing
+        thought_match = re.search(r"Thought:(.*?)(?=Reasoning:|$)", analysis_result, re.DOTALL)
+        reasoning_match = re.search(r"Reasoning:(.*?)(?=Final Answer:|$)", analysis_result, re.DOTALL)
+        answer_match = re.search(r"Final Answer:(.*?)$", analysis_result, re.DOTALL)
         
-        message = ""
-        details = {
-            "eligibility_status": "",
-            "recommendations": [],
-            "action_items": []
-        }
+        thought = thought_match.group(1).strip() if thought_match else ""
+        reasoning = reasoning_match.group(1).strip() if reasoning_match else ""
+        answer = answer_match.group(1).strip() if answer_match else analysis_result.strip()
         
-        current_section = None
-        
-        for line in lines:
-            line = line.strip()
-            if not line:
-                continue
-                
-            if "eligibility status:" in line.lower():
-                current_section = "eligibility"
-                continue
-            elif "recommendations:" in line.lower():
-                current_section = "recommendations"
-                continue
-            elif "action items:" in line.lower():
-                current_section = "actions"
-                continue
-                
-            if current_section == "eligibility":
-                details["eligibility_status"] += line + " "
-            elif current_section == "recommendations":
-                if line.startswith("-"):
-                    details["recommendations"].append(line[1:].strip())
-            elif current_section == "actions":
-                if line.startswith("-"):
-                    details["action_items"].append(line[1:].strip())
-            else:
-                message += line + " "
-        
-        # If no structured sections were found, use the entire text as the message
-        if not any(details.values()):
-            message = analysis_result.strip()
+        # Add final thought to debug info
+        if debug_info is None:
+            debug_info = []
             
+        debug_info.append({
+            "agent": "Response Formatter",
+            "timestamp": datetime.now().isoformat(),
+            "thought": thought,
+            "reasoning": reasoning,
+            "result": "Response formatted successfully"
+        })
+        
+        # Extract recommendations and action items
+        recommendations = self._extract_recommendations(answer)
+        action_items = self._extract_action_items(answer)
+        
+        # Get next steps based on the answer text
+        next_steps = self._get_next_steps(answer)
+        
         return {
-            "message": message.strip(),
-            "details": details
+            "response": {
+                "message": answer,
+                "details": {
+                    "recommendations": recommendations,
+                    "action_items": action_items
+                }
+            },
+            "next_steps": next_steps,
+            "debug_info": debug_info
         }
-    
+
     def _format_empty_response(self, message: str) -> Dict[str, Any]:
-        """
-        Format an empty response with an error message.
-        
-        Args:
-            message: Error message to include.
-            
-        Returns:
-            Dict[str, Any]: Empty response structure with required fields.
-        """
+        """Format an empty response with the given message."""
         return {
             "response": {
                 "message": message,
@@ -504,5 +520,65 @@ class ManagerAgent:
                     "action_items": []
                 }
             },
-            "next_steps": []
-        } 
+            "next_steps": ["Please provide more information about your benefits scenario"],
+            "debug_info": [{
+                "agent": "Manager Agent",
+                "timestamp": datetime.now().isoformat(),
+                "action": "Empty Response",
+                "result": message
+            }]
+        }
+
+    def _extract_recommendations(self, text: str) -> List[str]:
+        """Extract recommendations from the response text."""
+        recommendations = []
+        if "recommendations:" in text.lower():
+            section = text.lower().split("recommendations:")[1].split("\n")
+            for line in section:
+                line = line.strip()
+                if line and (line.startswith("-") or line.startswith("*")):
+                    recommendations.append(line[1:].strip())
+                elif "action items:" in line.lower() or "next steps:" in line.lower():
+                    break
+        return recommendations or ["Schedule a benefits consultation for personalized guidance"]
+        
+    def _extract_action_items(self, text: str) -> List[str]:
+        """Extract action items from the response text."""
+        action_items = []
+        if "action items:" in text.lower():
+            section = text.lower().split("action items:")[1].split("\n")
+            for line in section:
+                line = line.strip()
+                if line and (line.startswith("-") or line.startswith("*")):
+                    action_items.append(line[1:].strip())
+                elif "next steps:" in line.lower():
+                    break
+        return action_items or ["Review your benefits documentation", "Contact HR for clarification if needed"] 
+
+    async def route_query(self, query: str, context: Optional[Dict] = None) -> Dict[str, Any]:
+        """
+        Route and analyze a query, returning a structured response.
+        
+        Args:
+            query: The query to analyze.
+            context: Optional context information.
+            
+        Returns:
+            Dict[str, Any]: Structured response with debug info.
+        """
+        try:
+            # Extract employee_id from context if available
+            employee_id = context.get("employee_id") if context else "default"
+            
+            # Analyze the query
+            result = await self.analyze_query(employee_id, query)
+            
+            # Ensure debug_info is included in the response
+            if "debug_info" not in result:
+                result["debug_info"] = []
+                
+            return result
+            
+        except Exception as e:
+            print(f"Error in route_query: {str(e)}")
+            return self._format_empty_response(f"Error processing request: {str(e)}") 

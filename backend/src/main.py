@@ -51,6 +51,15 @@ class AnalyzeRequest(BaseModel):
     employee_id: str
     query: str
 
+class DebugEntry(BaseModel):
+    """Model for debug information entries."""
+    agent: str
+    timestamp: str
+    action: Optional[str] = None
+    thought: Optional[str] = None
+    reasoning: Optional[str] = None
+    result: Optional[str] = None
+
 class ResponseDetails(BaseModel):
     recommendations: List[str] = []
     action_items: List[str] = []
@@ -62,6 +71,7 @@ class ResponseMessage(BaseModel):
 class AnalyzeResponse(BaseModel):
     response: ResponseMessage
     next_steps: List[str] = []
+    debug_info: List[DebugEntry] = []
 
 @app.get("/")
 async def root() -> Dict[str, str]:

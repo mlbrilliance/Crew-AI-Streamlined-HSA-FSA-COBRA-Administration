@@ -23,11 +23,21 @@ class ResponseContent(BaseModel):
     message: str
     details: Optional[Union[ResponseDetails, Dict, str]] = None
 
+class DebugEntry(BaseModel):
+    """Model for agent debug information."""
+    agent: str
+    timestamp: str
+    action: Optional[str] = None
+    thought: Optional[str] = None
+    reasoning: Optional[str] = None
+    result: Optional[str] = None
+
 class QueryResponse(BaseModel):
     """Response model for analyzed and routed queries."""
     response: ResponseContent
     context: Optional[Dict] = None
     next_steps: List[str]
+    debug_info: Optional[List[DebugEntry]] = None
 
 @router.post("/analyze", response_model=QueryResponse)
 async def analyze_and_route_query(request: QueryRequest) -> QueryResponse:
@@ -59,6 +69,7 @@ async def analyze_and_route_query(request: QueryRequest) -> QueryResponse:
                 "details": str(e)
             },
             "context": {"error": str(e)},
-            "next_steps": ["Please try again with more specific information"]
+            "next_steps": ["Please try again with more specific information"],
+            "debug_info": []
         }
         return QueryResponse(**error_response) 
