@@ -1,6 +1,46 @@
-# Benefits Analysis Backend
+# Benefits Administration Backend
 
-This is the backend service for the Benefits Analysis system, which uses Google's Gemini AI to provide intelligent benefits analysis and recommendations.
+The backend service for the Benefits Administration system, powered by CrewAI and OpenAI for intelligent benefits analysis and recommendations.
+
+## Features
+
+### Multi-Agent System
+- **Manager Agent**: Orchestrates the entire conversation flow and coordinates other agents
+- **Query Analyzer**: Classifies and interprets user questions
+- **Context Agent**: Manages employee profiles and historical data
+- **Policy Agent**: Researches and applies relevant policy guidelines
+- **Wellness Agent**: Analyzes health metrics and risk factors
+- **Benefits Expert**: Generates personalized recommendations
+- **Response Analyzer**: Ensures quality and completeness of responses
+
+### Data Management
+- Employee profile management
+- Benefits eligibility tracking
+- Wellness metrics monitoring
+- Policy database integration
+- Chat history persistence
+
+### API Endpoints
+- `GET /`: Health check endpoint
+- `POST /manager/analyze`: Main endpoint for benefits analysis
+- `POST /benefits/analyze`: Legacy endpoint for basic benefits analysis
+
+## Dependencies
+
+### Core Dependencies
+- `fastapi`: Web framework for building APIs
+- `crewai`: Multi-agent orchestration framework
+- `openai`: OpenAI GPT integration
+- `supabase`: Database and authentication
+- `python-dotenv`: Environment variable management
+- `uvicorn`: ASGI server
+- `pydantic`: Data validation
+
+### Development Dependencies
+- `pytest`: Testing framework
+- `black`: Code formatting
+- `ruff`: Linting
+- `mypy`: Type checking
 
 ## Setup
 
@@ -10,12 +50,11 @@ python -m venv venv
 ```
 
 2. Activate the virtual environment:
-- Windows:
 ```bash
+# Windows
 .\venv\Scripts\activate
-```
-- Unix/MacOS:
-```bash
+
+# Unix/MacOS
 source venv/bin/activate
 ```
 
@@ -24,9 +63,14 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-4. Create a `.env` file in the backend directory with your configuration:
+4. Create a `.env` file:
 ```env
-GOOGLE_API_KEY=your_google_api_key_here
+# Required
+OPENAI_API_KEY=your_openai_api_key
+SUPABASE_URL=your_supabase_url
+SUPABASE_KEY=your_supabase_key
+
+# Optional
 HOST=0.0.0.0
 PORT=8000
 DEBUG=True
@@ -35,25 +79,17 @@ ENVIRONMENT=development
 
 ## Running the Server
 
-Start the FastAPI server:
+### Development
 ```bash
 uvicorn src.main:app --reload
 ```
 
-The API will be available at http://localhost:8000
-
-## API Endpoints
-
-- `GET /`: Health check endpoint
-- `POST /benefits/analyze`: Analyze a benefits scenario
-- `POST /benefits/recommend`: Get personalized benefits recommendations
-
-## Testing
-
-Run the tests using pytest:
+### Production
 ```bash
-pytest
+uvicorn src.main:app --host 0.0.0.0 --port 8000
 ```
+
+The API will be available at http://localhost:8000
 
 ## Project Structure
 
@@ -61,19 +97,74 @@ pytest
 backend/
 ├── src/
 │   ├── agents/
+│   │   ├── __init__.py
+│   │   ├── manager_agent.py
 │   │   └── eligibility_agent.py
+│   ├── config/
+│   │   ├── __init__.py
+│   │   └── settings.py
+│   ├── repositories/
+│   │   ├── __init__.py
+│   │   └── data_repository.py
+│   ├── services/
+│   │   └── __init__.py
+│   ├── __init__.py
 │   └── main.py
 ├── tests/
-│   └── test_eligibility_agent.py
-├── config/
+│   ├── __init__.py
+│   ├── conftest.py
+│   └── test_manager_agent.py
 ├── .env
+├── .gitignore
 ├── requirements.txt
 └── README.md
 ```
 
-## Development
+## Development Guidelines
 
-- All Python code is typed and includes docstrings
-- Tests are written using pytest
-- Environment variables are managed using python-dotenv
-- API documentation is available at http://localhost:8000/docs 
+### Code Style
+- All Python code must be typed
+- Use docstrings for all functions and classes
+- Follow PEP 8 style guide
+- Use black for code formatting
+- Use ruff for linting
+- Use mypy for type checking
+
+### Testing
+Run tests using pytest:
+```bash
+pytest
+```
+
+With coverage:
+```bash
+pytest --cov=src tests/
+```
+
+### API Documentation
+- Swagger UI: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
+
+## Debugging
+
+### Logging
+The application uses Python's built-in logging module:
+```python
+import logging
+logging.basicConfig(level=logging.DEBUG)
+```
+
+### Debug Mode
+Set `DEBUG=True` in `.env` for detailed error messages.
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Add tests for new features
+4. Ensure all tests pass
+5. Submit a pull request
+
+## License
+
+This project is licensed under the MIT License. 

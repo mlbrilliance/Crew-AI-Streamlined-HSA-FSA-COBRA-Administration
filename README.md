@@ -1,74 +1,145 @@
 # HSA/FSA/COBRA Administration System
 
-An AI-powered benefits administration system using CrewAI agents for intelligent analysis and recommendations.
+An AI-powered benefits administration system using CrewAI agents for intelligent analysis and recommendations. The system provides real-time, personalized guidance on benefits-related queries through a sophisticated multi-agent architecture.
 
-## Agent Hierarchy and Responsibilities
+## Features
 
-### 1. Supervisor Agent (Manager)
-The orchestrator of the entire agent ecosystem with the following responsibilities:
-- Acts as the coordinator between all specialized agents
-- Determines which agent(s) to engage based on user queries
-- Maintains conversation context and history
-- Aggregates and synthesizes responses from multiple agents
-- Makes final decisions when agents have conflicting recommendations
-- Manages database interactions through a unified interface
-- Prioritizes tasks and manages workflow between agents
+### Interactive Chat Interface
+- Real-time conversational interface for benefits inquiries
+- Personalized responses based on employee profile and context
+- Visual agent activity tracking through "CrewAI Agents Activity" popup
+- Detailed explanation of agent thought processes and decision-making
 
-### 2. Eligibility Agent
-Specializes in benefits eligibility analysis with these key functions:
-- Analyzes individual eligibility for HSA/FSA/COBRA
-- Queries Supabase for:
-  - Employee status and history
-  - Current benefit enrollments
-  - Previous eligibility determinations
-- Provides personalized recommendations
-- Updates eligibility status in database
+### Agent System Architecture
 
-### 3. Compliance Agent
-Ensures regulatory compliance and proper documentation:
-- Monitors regulatory requirements
-- Validates benefit setups against IRS/DOL rules
-- Queries Supabase for:
-  - Compliance history
-  - Documentation status
-  - Required notifications/deadlines
-- Flags potential compliance issues
-- Maintains audit trails in database
+#### 1. Manager Agent (Supervisor)
+- Orchestrates the entire conversation flow
+- Coordinates specialized sub-agents
+- Manages context and employee profiles
+- Provides final, synthesized responses
 
-### 4. QA Agent
-Ensures quality and consistency across all recommendations:
-- Reviews recommendations from other agents
-- Validates data consistency
-- Performs fact-checking against:
-  - Current regulations
-  - Company policies
-  - Historical decisions in Supabase
-- Identifies potential errors or inconsistencies
-- Maintains quality metrics in database
+#### 2. Specialized Agents
+- **Query Analyzer**: Classifies and interprets user questions
+- **Context Agent**: Manages employee profiles and historical data
+- **Policy Agent**: Researches and applies relevant policy guidelines
+- **Wellness Agent**: Analyzes health metrics and risk factors
+- **Benefits Expert**: Generates personalized recommendations
+- **Response Analyzer**: Ensures quality and completeness of responses
 
-## Implementation Status
+### Data Integration
+- Real-time employee profile access
+- Benefits eligibility tracking
+- Wellness metrics monitoring
+- Policy database integration
+- Chat history persistence
 
-- ✅ Eligibility Agent: Implemented and functional
-- 🔄 Compliance Agent: Planned for next phase
-- 🔄 Supervisor Agent: In planning
-- 🔄 QA Agent: In planning
+### Analytics and Monitoring
+- Agent activity visualization
+- Decision-making process transparency
+- Real-time debug information
+- Response quality tracking
 
-## Database Integration
+## Technical Stack
 
-The system integrates with Supabase for:
-- Real-time data synchronization
-- Conversation history tracking
-- Agent decision logging
-- Performance metrics
-- Audit trail maintenance
-- Caching frequently accessed data
+### Frontend
+- Next.js with TypeScript
+- Tailwind CSS for styling
+- React state management
+- WebSocket for real-time updates
 
-## Frontend Integration
+### Backend
+- FastAPI for API endpoints
+- CrewAI for agent orchestration
+- OpenAI GPT for natural language processing
+- Supabase for data persistence
 
-The NextJS frontend provides:
-- Interactive chat interface
-- Real-time status updates
-- Visual representation of agent activities
-- Detailed explanation of decisions
-- User feedback collection
-- Progress tracking for complex queries
+## Setup Instructions
+
+### Prerequisites
+- Node.js 18+ for frontend
+- Python 3.10+ for backend
+- OpenAI API key
+- Supabase account and credentials
+
+### Frontend Setup
+1. Navigate to the frontend directory:
+```bash
+cd frontend
+```
+
+2. Install dependencies:
+```bash
+npm install
+```
+
+3. Create `.env.local`:
+```env
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_key
+```
+
+4. Start the development server:
+```bash
+npm run dev
+```
+
+### Backend Setup
+1. Navigate to the backend directory:
+```bash
+cd backend
+```
+
+2. Create and activate virtual environment:
+```bash
+python -m venv venv
+source venv/bin/activate  # Unix/MacOS
+.\venv\Scripts\activate   # Windows
+```
+
+3. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+4. Create `.env`:
+```env
+OPENAI_API_KEY=your_openai_api_key
+SUPABASE_URL=your_supabase_url
+SUPABASE_KEY=your_supabase_key
+```
+
+5. Start the backend server:
+```bash
+uvicorn src.main:app --reload
+```
+
+## Usage
+
+1. Access the application at `http://localhost:3000`
+2. Log in with employee credentials
+3. Start asking benefits-related questions
+4. Click the "Users" icon to view agent activity
+
+## Features in Development
+
+- ✅ Basic chat interface
+- ✅ Agent activity visualization
+- ✅ Employee profile integration
+- ✅ Policy-based responses
+- ✅ Wellness metrics integration
+- 🔄 Multi-agent collaboration
+- 🔄 Advanced analytics dashboard
+- 🔄 Document upload/processing
+- 🔄 Mobile responsive design
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
