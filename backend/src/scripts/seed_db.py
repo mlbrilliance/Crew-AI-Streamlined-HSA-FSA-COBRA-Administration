@@ -202,23 +202,33 @@ def seed_database():
     """Seed the database with sample data."""
     load_dotenv()
     supabase_url = os.getenv("SUPABASE_URL")
-    supabase_key = os.getenv("SUPABASE_KEY")
+    supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
     
     if not supabase_url or not supabase_key:
-        raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set in environment variables")
+        raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in environment variables")
+        
+    print(f"Debug - Supabase URL: {supabase_url}")
+    print(f"Debug - Service Role Key exists: {bool(supabase_key)}")
+    print(f"Debug - Service Role Key length: {len(supabase_key) if supabase_key else 0}")
         
     supabase: Client = create_client(supabase_url, supabase_key)
     
+    # Generate sample data
+    data = generate_sample_data()
+    
     try:
-        sample_data = generate_sample_data()
-        
-        # Insert data into tables
-        for table_name, data in sample_data.items():
-            table = f"mock_{table_name}"
-            for record in data:
-                supabase.table(table).insert(record).execute()
-                
-        print("Database seeding completed successfully")
+        # Insert data into each table
+        for table, records in data.items():
+            print(f"\nSeeding {table}...")
+            for record in records:
+                try:
+                    supabase.table(table).insert(record).execute()
+                    print(f"Successfully inserted record into {table}")
+                except Exception as e:
+                    print(f"Error inserting record into {table}: {str(e)}")
+                    continue
+                    
+        print("\nDatabase seeding completed successfully")
         
     except Exception as e:
         print(f"Error seeding database: {str(e)}")

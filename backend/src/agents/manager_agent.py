@@ -14,6 +14,8 @@ Developer:
 from typing import Dict, Any, List, Optional
 from crewai import Agent, Task, Crew
 from .eligibility_agent import EligibilityAgent
+from .wellness_agent import WellnessAgent
+from .policy_agent import PolicyAgent
 from ..repositories.data_repository import DataRepository
 import os
 from dotenv import load_dotenv, find_dotenv
@@ -21,6 +23,8 @@ from langchain_openai import ChatOpenAI
 import json
 from datetime import datetime
 import re
+from langchain.prompts import PromptTemplate
+from langchain.chains import LLMChain
 
 class ManagerAgent:
     """Agent responsible for managing and coordinating benefits analysis tasks."""
@@ -39,10 +43,57 @@ class ManagerAgent:
         if not openai_api_key:
             raise ValueError("OPENAI_API_KEY environment variable is not set")
         
-        # Initialize eligibility agent
-        self.eligibility_agent = EligibilityAgent()
+        # Initialize data repository
+        self.data_repo = DataRepository()
         
-        # Initialize the base Agent
+        # Initialize agents
+        self.eligibility_agent = EligibilityAgent()
+        self.wellness_agent = WellnessAgent()
+        self.policy_agent = PolicyAgent()
+        
+        # Initialize the LLM
+        self.llm = ChatOpenAI(
+            model="gpt-3.5-turbo",
+            temperature=0.7,
+            api_key=openai_api_key
+        )
+        
+        # Initialize the LLM chain with a simple prompt template
+        template = """
+        You are a senior benefits advisor with deep expertise in HSA, FSA, and COBRA benefits.
+        Your responses must be detailed, personalized, and actionable.
+        
+        Context:
+        {task_description}
+        
+        Please analyze the situation and provide a response in the following format:
+        
+        Thought: [Your analysis of the situation]
+        
+        Reasoning: [Your explanation]
+        
+        Final Answer: [Your detailed response]
+        
+        Remember to:
+        1. Be specific and reference the employee's situation
+        2. Include clear recommendations
+        3. Provide actionable next steps
+        4. Reference relevant policies
+        5. Consider wellness data in your response
+        """
+        
+        prompt = PromptTemplate(
+            input_variables=["task_description"],
+            template=template
+        )
+        
+        self.llm_chain = LLMChain(
+            llm=self.llm,
+            prompt=prompt,
+            verbose=True
+        )
+        
+        # Initialize the base Agent for complex queries
         self.agent = Agent(
             role='Benefits Expert',
             goal='Provide detailed, personalized benefits guidance',
@@ -59,266 +110,218 @@ class ManagerAgent:
             6. Tax advantages""",
             verbose=True,
             allow_delegation=False,
-            llm=ChatOpenAI(
-                model="gpt-3.5-turbo",
-                temperature=0.7,
-                api_key=openai_api_key
-            )
+            llm=self.llm
         )
     
     async def analyze_query(self, employee_id: str, query: str) -> Dict[str, Any]:
         """
-        Analyze a benefits query by coordinating with specialized agents.
+        Analyze a user query and provide a response using the agent chain.
         
         Args:
-            employee_id: The ID of the employee.
-            query: The benefits query to analyze.
+            employee_id: The ID of the employee making the query.
+            query: The question or request from the user.
             
         Returns:
-            Dict[str, Any]: Analysis results and recommendations.
+            Dict[str, Any]: Formatted response with recommendations and next steps.
         """
         try:
-            # Initialize debug info list
+            print("\n=== Starting analyze_query ===")
             debug_info = []
+            
+            print("\nStep 1: Getting employee profile...")
+            profile = self.data_repo.get_employee_profile(employee_id)
+            print(f"Profile received: {json.dumps(profile, indent=2)}")
+            employee = profile.get('employee', {})
+            
+            print("\nStep 2: Determining query type...")
+            query_type = self._determine_query_type(query)
+            print(f"Query type determined: {query_type}")
+            
+            print("\nStep 3: Getting relevant policies...")
+            policies = self.policy_agent.get_relevant_policies(query_type)
+            print(f"Policies received: {json.dumps(policies, indent=2)}")
+            policy_details = "\n".join([f"- {str(p)}" for p in policies])
+            
+            print("\nStep 4: Adding policy debug info...")
             debug_info.append({
-                "agent": "Manager Agent",
-                "timestamp": datetime.now().isoformat(),
-                "action": "Query Analysis Started",
-                "thought": "Initiating comprehensive analysis of user query",
-                "reasoning": "Need to understand query context and gather relevant employee data",
-                "result": f"Processing query: {query}"
+                "agent": "Policy Agent",
+                "timestamp": str(datetime.now().isoformat()),
+                "action": "Policy Research",
+                "thought": "Searching knowledge base for relevant policies",
+                "reasoning": "Need to ensure response aligns with current policy guidelines",
+                "result": f"Found {len(policies)} relevant policies for {query_type}"
             })
 
-            # Create data repository instance
-            data_repo = DataRepository()
+            print("\nStep 5: Getting wellness data...")
+            wellness_analysis = self.wellness_agent.get_wellness_analysis(employee_id)
+            print(f"Wellness analysis received: {json.dumps(wellness_analysis, indent=2)}")
+            wellness_data = wellness_analysis.get("wellness_data", {})
             
-            # Get employee context and additional data
-            debug_info.append({
-                "agent": "Manager Agent",
-                "timestamp": datetime.now().isoformat(),
-                "action": "Context Gathering",
-                "thought": "Building comprehensive employee profile",
-                "reasoning": "Need complete employee data to provide accurate, personalized response",
-                "result": "Retrieving employee profile, benefits status, and wellness metrics"
-            })
-
-            context = data_repo.get_chat_context(employee_id)
-            if not context.get("employee"):
-                return self._format_empty_response("Employee not found")
-                
-            # Get comprehensive employee profile
-            profile = data_repo.get_employee_profile(employee_id)
-            employee = profile.get("employee", {})
-            
-            debug_info.append({
-                "agent": "Context Agent",
-                "timestamp": datetime.now().isoformat(),
-                "action": "Profile Analysis",
-                "thought": "Analyzing employee benefits eligibility and status",
-                "reasoning": "Need to understand current benefits status to provide relevant guidance",
-                "result": f"Employee Profile: {employee.get('name')} | FSA Eligible: {profile.get('employee', {}).get('fsa_eligible')} | HSA Eligible: {profile.get('employee', {}).get('hsa_eligible')}"
-            })
-
-            # Check if this is the first message in the conversation
-            chat_history = context.get("chat_history", [])
-            is_first_message = len(chat_history) == 0
-            
-            try:
-                greeting = f"Hello {employee.get('name', 'there')}! " if is_first_message else ""
-                
-                # Determine query type and get relevant policy details
-                query_type = self._determine_query_type(query)
-                debug_info.append({
-                    "agent": "Query Analyzer",
-                    "timestamp": datetime.now().isoformat(),
-                    "action": "Query Classification",
-                    "thought": "Analyzing query intent and category",
-                    "reasoning": "Need to identify specific benefits domain to provide focused response",
-                    "result": f"Query classified as: {query_type}"
-                })
-
-                policies = data_repo.get_relevant_policies(query)
-                policy_details = policies[0]["policy_text"] if policies else ""
-
-                debug_info.append({
-                    "agent": "Policy Agent",
-                    "timestamp": datetime.now().isoformat(),
-                    "action": "Policy Research",
-                    "thought": "Searching knowledge base for relevant policies",
-                    "reasoning": "Need to ensure response aligns with current policy guidelines",
-                    "result": f"Found {len(policies)} relevant policies for {query_type}"
-                })
-
-                # Get wellness data with proper error handling
-                debug_info.append({
-                    "agent": "Wellness Agent",
-                    "timestamp": datetime.now().isoformat(),
-                    "action": "Health Assessment",
-                    "thought": "Evaluating wellness metrics and risk factors",
-                    "reasoning": "Need to consider health context for benefits recommendations",
-                    "result": "Analyzing wellness data for personalized guidance"
-                })
-
-                try:
-                    wellness_data = data_repo.get_employee_risk_assessment(employee_id)
-                    if not wellness_data:
-                        wellness_data = {
-                            'metrics': {},
-                            'risk_factors': [],
-                            'recommendations': []
+            print("\nStep 6: Sanitizing debug info from wellness analysis...")
+            if isinstance(wellness_analysis.get("debug_info"), list):
+                for debug_entry in wellness_analysis["debug_info"]:
+                    if isinstance(debug_entry, dict):
+                        sanitized_entry = {
+                            "agent": str(debug_entry.get("agent", "Unknown")),
+                            "timestamp": str(debug_entry.get("timestamp", datetime.now().isoformat())),
+                            "action": str(debug_entry.get("action", "")),
+                            "thought": str(debug_entry.get("thought", "")),
+                            "reasoning": str(debug_entry.get("reasoning", "")),
+                            "result": str(debug_entry.get("result", ""))
                         }
-                    debug_info.append({
-                        "agent": "Wellness Agent",
-                        "timestamp": datetime.now().isoformat(),
-                        "action": "Risk Assessment",
-                        "thought": "Evaluating health risk factors",
-                        "reasoning": "Need to identify potential health-related benefits needs",
-                        "result": f"Risk Factors: {len(wellness_data.get('risk_factors', []))} identified"
-                    })
-                except Exception as e:
-                    print(f"Error fetching wellness data: {str(e)}")
-                    wellness_data = {
-                        'metrics': {},
-                        'risk_factors': [],
-                        'recommendations': []
+                        debug_info.append(sanitized_entry)
+            elif wellness_analysis.get("debug_info"):
+                debug_entry = wellness_analysis["debug_info"]
+                if isinstance(debug_entry, dict):
+                    sanitized_entry = {
+                        "agent": str(debug_entry.get("agent", "Unknown")),
+                        "timestamp": str(debug_entry.get("timestamp", datetime.now().isoformat())),
+                        "action": str(debug_entry.get("action", "")),
+                        "thought": str(debug_entry.get("thought", "")),
+                        "reasoning": str(debug_entry.get("reasoning", "")),
+                        "result": str(debug_entry.get("result", ""))
                     }
-                    debug_info.append({
-                        "agent": "Wellness Agent",
-                        "timestamp": datetime.now().isoformat(),
-                        "action": "Error Recovery",
-                        "thought": "Handling wellness data retrieval error",
-                        "reasoning": "Need to proceed with available data",
-                        "result": f"Using default wellness profile due to error: {str(e)}"
-                    })
+                    debug_info.append(sanitized_entry)
 
-                # Create task description with proper error handling for each section
-                debug_info.append({
-                    "agent": "Task Manager",
-                    "timestamp": datetime.now().isoformat(),
-                    "action": "Response Planning",
-                    "thought": "Preparing comprehensive response strategy",
-                    "reasoning": "Need to combine all gathered information into coherent guidance",
-                    "result": "Initiating response generation with collected context"
-                })
+            print("\nStep 7: Formatting metrics...")
+            formatted_metrics = {}
+            for key, value in wellness_data.get("metrics", {}).items():
+                if isinstance(value, dict):
+                    formatted_metrics[key] = {k: str(v) for k, v in value.items()}
+                else:
+                    formatted_metrics[key] = str(value)
+            print(f"Formatted metrics: {json.dumps(formatted_metrics, indent=2)}")
 
-                # Ensure metrics are properly formatted
-                formatted_metrics = {
-                    'heart_rate': wellness_data.get('metrics', {}).get('heart_rate', 'N/A'),
-                    'sleep_hours': wellness_data.get('metrics', {}).get('sleep_hours', 'N/A'),
-                    'exercise_minutes': wellness_data.get('metrics', {}).get('exercise_minutes', 'N/A'),
-                    'daily_steps': wellness_data.get('metrics', {}).get('daily_steps', 'N/A'),
-                    'stress_level': wellness_data.get('metrics', {}).get('stress_level', 'N/A')
-                }
+            print("\nStep 8: Sanitizing risk factors and recommendations...")
+            risk_factors = [str(factor) for factor in wellness_data.get('risk_factors', [])]
+            wellness_recommendations = [str(rec) for rec in wellness_data.get('recommendations', [])]
+            print(f"Risk factors: {json.dumps(risk_factors, indent=2)}")
+            print(f"Wellness recommendations: {json.dumps(wellness_recommendations, indent=2)}")
 
-                # Create task description with proper error handling for each section
-                task_description = f"""
-                Answer the following benefits question for {employee.get('name', 'the user')}.
+            print("\nStep 9: Creating task description...")
+            current_hour = datetime.now().hour
+            greeting = "Good morning" if 5 <= current_hour < 12 else "Good afternoon" if 12 <= current_hour < 17 else "Good evening"
+            greeting = f"{greeting}, {employee.get('name', 'there')}! "
 
-                Employee Profile:
-                - Name: {employee.get('name', 'the user')}
-                - FSA Eligible: {profile.get('employee', {}).get('fsa_eligible', 'Unknown')}
-                - HSA Eligible: {profile.get('employee', {}).get('hsa_eligible', 'Unknown')}
-                - COBRA Status: {profile.get('employee', {}).get('cobra_status', 'Unknown')}
-                - Dependents: {', '.join([f"{d.get('name', '')} ({d.get('relationship', '')})" for d in profile.get('employee', {}).get('dependents', [])])}
+            task_description = f"""
+            Answer the following benefits question for {employee.get('name', 'the user')}.
+
+            Employee Profile:
+            - Name: {employee.get('name', 'the user')}
+            - FSA Eligible: {profile.get('employee', {}).get('fsa_eligible', 'Unknown')}
+            - HSA Eligible: {profile.get('employee', {}).get('hsa_eligible', 'Unknown')}
+            - COBRA Status: {profile.get('employee', {}).get('cobra_status', 'Unknown')}
+            - Dependents: {', '.join([f"{d.get('name', '')} ({d.get('relationship', '')})" for d in profile.get('dependents', [])])}
+            
+            Benefits Status:
+            - Current Claims: {len(profile.get('claims', []))} active claims
+            - Recent Life Events: {len(profile.get('life_events', []))} events in the past year
+            
+            Wellness Data:
+            - Heart Rate: {formatted_metrics.get('heart_rate', 'N/A')}
+            - Sleep Hours: {formatted_metrics.get('sleep_hours', 'N/A')}
+            - Exercise Minutes: {formatted_metrics.get('exercise_minutes', 'N/A')}
+            - Daily Steps: {formatted_metrics.get('daily_steps', 'N/A')}
+            - Stress Level: {formatted_metrics.get('stress_level', 'N/A')}
+            - Risk Factors: {', '.join(risk_factors) if risk_factors else 'None identified'}
+            - Health Recommendations: {', '.join(wellness_recommendations) if wellness_recommendations else 'None available'}
+
+            Question: {query}
+
+            Relevant Policy: {policy_details}
+
+            You MUST format your response exactly like this:
+            
+            Thought: [Your analysis of the situation based on their specific profile and data]
+            
+            Reasoning: [Your explanation that references their specific eligibility status, wellness metrics, and history]
+            
+            Final Answer: {greeting}[Your detailed response that addresses their specific situation]
+            """
+            print("\nTask description created successfully")
+
+            print("\nStep 10: Running LLM chain...")
+            try:
+                print("\nRunning LLM chain with task description...")
+                chain_response = self.llm_chain.run(task_description)
+                print(f"\nLLM chain response received: {chain_response[:200]}...")
                 
-                Benefits Status:
-                - Current Claims: {len(profile.get('claims', []))} active claims
-                - Recent Life Events: {len(profile.get('life_events', []))} events in the past year
+                print("\nStep 11: Formatting response...")
+                # Extract action items before formatting response
+                action_items = self._get_action_items(query)
                 
-                Wellness Data:
-                - Heart Rate: {formatted_metrics['heart_rate']} bpm
-                - Sleep Hours: {formatted_metrics['sleep_hours']} hours/night
-                - Exercise Minutes: {formatted_metrics['exercise_minutes']} minutes/day
-                - Daily Steps: {formatted_metrics['daily_steps']} steps
-                - Stress Level: {formatted_metrics['stress_level']}/10
-                - Risk Factors: {', '.join(str(factor) for factor in wellness_data.get('risk_factors', [])) if wellness_data.get('risk_factors', []) else 'None identified'}
-                - Health Recommendations: {', '.join(str(r.get('message', '')) for r in wellness_data.get('recommendations', [])) if wellness_data.get('recommendations', []) else 'None available'}
-
-                Question: {query}
-
-                Relevant Policy: {policy_details}
-
-                You MUST format your response exactly like this:
+                # Convert chain_response to string if it's not already
+                if not isinstance(chain_response, str):
+                    chain_response = str(chain_response)
                 
-                Thought: [Your analysis of the situation based on their specific profile and data]
+                # Ensure debug_info is properly formatted
+                sanitized_debug = []
+                for entry in debug_info:
+                    if isinstance(entry, dict):
+                        sanitized_entry = {
+                            "agent": str(entry.get("agent", "Unknown")),
+                            "timestamp": str(entry.get("timestamp", datetime.now().isoformat())),
+                            "action": str(entry.get("action", "")),
+                            "thought": str(entry.get("thought", "")),
+                            "reasoning": str(entry.get("reasoning", "")),
+                            "result": str(entry.get("result", ""))
+                        }
+                        sanitized_debug.append(sanitized_entry)
                 
-                Reasoning: [Your explanation that references their specific eligibility status, wellness metrics, and history]
-                
-                Final Answer: {greeting}[Your detailed response that addresses their specific situation]
-                """
-
-                # Create and execute the task
-                task = Task(
-                    description=task_description,
-                    expected_output="A detailed, personalized response that addresses the employee's specific situation and benefits question",
-                    agent=self.agent
-                )
-
-                debug_info.append({
-                    "agent": "Benefits Expert",
-                    "timestamp": datetime.now().isoformat(),
-                    "action": "Response Generation",
-                    "thought": "Formulating personalized benefits guidance",
-                    "reasoning": "Need to provide actionable, specific advice based on all gathered data",
-                    "result": "Generating detailed response with recommendations"
-                })
-
-                # Create a crew with just this agent and task
-                crew = Crew(
-                    agents=[self.agent],
-                    tasks=[task],
-                    verbose=True
-                )
-
-                # Execute the crew's task and get the response
-                raw_response = crew.kickoff()
-                
-                debug_info.append({
-                    "agent": "Response Analyzer",
-                    "timestamp": datetime.now().isoformat(),
-                    "action": "Quality Check",
-                    "thought": "Reviewing generated response",
-                    "reasoning": "Need to ensure response meets quality standards and addresses query completely",
-                    "result": "Response validated and ready for delivery"
-                })
-
-                # Process the response
-                processed_response = str(raw_response).strip()
-                
-                # Format the response with debug info
-                formatted_response = self._format_response(processed_response, debug_info)
+                formatted_response = self._format_response(chain_response, sanitized_debug, action_items)
+                print(f"\nFormatted response: {json.dumps(formatted_response, indent=2)}")
                 
                 return formatted_response
                 
-            except Exception as e:
-                print(f"Error in analyze_query: {str(e)}")
+            except Exception as chain_error:
+                print(f"\nError in LLM chain: {str(chain_error)}")
+                print(f"Error type: {type(chain_error)}")
+                print(f"Error details: {chain_error.__dict__ if hasattr(chain_error, '__dict__') else 'No details'}")
                 debug_info.append({
-                    "agent": "Manager Agent",
-                    "timestamp": datetime.now().isoformat(),
-                    "action": "Error Handling",
-                    "result": f"Error: {str(e)}"
+                    "agent": "LLM Chain",
+                    "timestamp": str(datetime.now().isoformat()),
+                    "action": "Process Query",
+                    "thought": "Error occurred during LLM processing",
+                    "reasoning": "Chain execution failed",
+                    "result": str(chain_error)
                 })
-                return self._format_empty_response(f"Error processing request: {str(e)}")
+                return self._format_empty_response(f"An error occurred while processing your request: {str(chain_error)}")
                 
         except Exception as e:
-            print(f"Error in analyze_query: {str(e)}")
-            return self._format_empty_response(f"Error processing request: {str(e)}")
+            print(f"\nError in analyze_query: {str(e)}")
+            print(f"Error type: {type(e)}")
+            print(f"Error details: {e.__dict__ if hasattr(e, '__dict__') else 'No details'}")
+            return self._format_empty_response(f"An error occurred while processing your request: {str(e)}")
             
     def _determine_query_type(self, query: str) -> str:
-        """Determine the type of query based on keywords."""
-        query = query.upper()
-        if "FSA" in query and "REIMBURSEMENT" in query:
+        """
+        Determine the type of query based on keywords.
+        
+        Args:
+            query: The query string to analyze.
+            
+        Returns:
+            str: The determined query type.
+        """
+        query = query.lower()
+        
+        # Check for specific combinations first
+        if "hsa" in query and "fsa" in query:
+            return "HSA Benefits"  # Default to HSA when comparing both
+        elif "fsa" in query and "reimbursement" in query:
             return "FSA Reimbursement Process"
-        elif "FSA" in query and "CONTRIBUTION" in query:
+        elif "fsa" in query and "contribution" in query:
             return "FSA Contribution Changes"
-        elif "FSA" in query:
+        elif "fsa" in query:
             return "FSA Benefits"
-        elif "HSA" in query and "CONTRIBUTION" in query:
+        elif "hsa" in query and "contribution" in query:
             return "HSA Contribution Limits"
-        elif "HSA" in query:
+        elif "hsa" in query:
             return "HSA Benefits"
-        elif "COBRA" in query:
+        elif "cobra" in query:
             return "COBRA Benefits"
+        
+        # Default to General Benefits if no specific type is found
         return "General Benefits"
             
     def _format_chat_history(self, history: List[Dict[str, Any]]) -> str:
@@ -344,145 +347,237 @@ class ManagerAgent:
         return "\n".join(formatted)
     
     def _get_recommendations(self, query: str, profile: Dict) -> List[str]:
-        """Generate personalized recommendations based on the query and profile."""
-        query = query.upper()
+        """
+        Generate recommendations based on the query and profile.
         
-        # Get wellness data
-        wellness_data = profile.get('wellness_data', {})
-        metrics = wellness_data.get('metrics', {})
-        
-        # Initialize recommendations list
-        recommendations = []
-        
-        # Add wellness-specific recommendations if relevant
-        if "WELLNESS" in query or "HEALTH" in query:
-            try:
-                # Convert metrics to integers for comparison, using 0 as default
-                heart_rate = int(metrics.get('heart_rate', 0))
-                sleep_hours = int(metrics.get('sleep_hours', 0))
-                exercise_minutes = int(metrics.get('exercise_minutes', 0))
-                daily_steps = int(metrics.get('daily_steps', 0))
-                stress_level = int(metrics.get('stress_level', 0))
-                
-                if heart_rate > 80:
-                    recommendations.append(
-                        "Your heart rate is elevated. Consider incorporating more cardiovascular exercise and stress reduction techniques."
-                    )
-                if sleep_hours < 7:
-                    recommendations.append(
-                        "You're getting less than the recommended amount of sleep. Try to establish a regular sleep schedule aiming for 7-9 hours."
-                    )
-                if exercise_minutes < 30:
-                    recommendations.append(
-                        "Increase your daily physical activity to at least 30 minutes of moderate exercise most days."
-                    )
-                if daily_steps < 8000:
-                    recommendations.append(
-                        "Try to increase your daily step count. A goal of 10,000 steps per day can improve overall health."
-                    )
-                if stress_level > 6:
-                    recommendations.append(
-                        "Your stress levels are elevated. Consider stress management techniques like meditation or counseling."
-                    )
-            except (ValueError, TypeError):
-                # If any conversion fails, add a generic recommendation
-                recommendations.append(
-                    "Consider scheduling a wellness check-up to establish your baseline health metrics."
-                )
-                
-        # Add FSA-specific recommendations
-        if "FSA" in query and "REIMBURSEMENT" in query:
-            recommendations.extend([
-                "Take photos of receipts immediately after purchases to avoid losing them",
-                "Set up direct deposit for faster reimbursement processing",
-                "Keep a digital backup of all submitted receipts and claim forms",
-                "Consider using your FSA debit card for instant payment when available",
-                "Create a folder system to organize receipts by date and category"
-            ])
-        elif "FSA" in query and "CONTRIBUTION" in query:
-            recommendations.extend([
-                f"Review your annual healthcare expenses to optimize contribution amount (up to $3,200 for 2024)",
-                "Consider upcoming medical procedures when setting contribution amount",
-                "Remember the use-it-or-lose-it rule when planning contributions",
-                "Check if your plan offers a grace period or carryover option",
-                "Set up monthly expense tracking to stay within your FSA budget"
-            ])
-        elif "FSA" in query:
-            recommendations.extend([
-                "Keep a list of FSA-eligible expenses for reference",
-                "Save receipts for all healthcare-related purchases",
-                "Download your FSA administrator's mobile app for easy access",
-                "Review your FSA balance regularly",
-                "Plan major medical expenses around your FSA cycle"
-            ])
+        Args:
+            query: The query string to analyze.
+            profile: Employee profile data.
             
-        return recommendations
+        Returns:
+            List[str]: List of recommendations.
+        """
+        try:
+            query = query.lower()
+            recommendations = []
+            
+            # Add base recommendations based on query type
+            if "hsa" in query and "fsa" in query:
+                recommendations.extend([
+                    "Compare HSA and FSA features based on your healthcare needs",
+                    "Review contribution limits for both accounts",
+                    "Consider your eligibility status for each account",
+                    "Evaluate your expected healthcare expenses",
+                    "Understand the tax advantages of each account type"
+                ])
+            elif "hsa" in query and "contribution" in query:
+                recommendations.extend([
+                    f"Review 2024 HSA contribution limits: $4,150 individual, $8,300 family",
+                    "Consider catch-up contributions if you're 55 or older",
+                    "Plan contributions based on expected medical expenses",
+                    "Review employer HSA contribution matching if available",
+                    "Set up automatic payroll deductions for consistent saving"
+                ])
+            elif "hsa" in query:
+                recommendations.extend([
+                    "Verify your HDHP enrollment status",
+                    "Review HSA investment options if available",
+                    "Keep records of all qualified medical expenses",
+                    "Consider long-term HSA growth strategy",
+                    "Understand HSA rollover and portability benefits"
+                ])
+            elif "fsa" in query and "reimbursement" in query:
+                recommendations.extend([
+                    "Keep all receipts organized by date and category",
+                    "Submit claims promptly to avoid processing delays",
+                    "Use FSA debit card for immediate payment when possible",
+                    "Maintain digital copies of all submitted documentation",
+                    "Track reimbursement status and follow up if needed"
+                ])
+            elif "fsa" in query and "contribution" in query:
+                recommendations.extend([
+                    "Review your annual healthcare expenses to optimize contribution amount",
+                    "Consider upcoming medical procedures when planning",
+                    "Remember the use-it-or-lose-it rule",
+                    "Check if your plan offers a grace period or carryover",
+                    "Set up monthly expense tracking"
+                ])
+            elif "fsa" in query:
+                recommendations.extend([
+                    "Keep a list of FSA-eligible expenses",
+                    "Save receipts for all healthcare purchases",
+                    "Download your FSA administrator's mobile app",
+                    "Review your FSA balance regularly",
+                    "Plan major medical expenses around your FSA cycle"
+                ])
+            elif "cobra" in query:
+                recommendations.extend([
+                    "Compare COBRA costs with marketplace options",
+                    "Understand coverage continuation periods",
+                    "Review all available insurance alternatives",
+                    "Consider HSA funds for premium payments if applicable",
+                    "Keep track of important COBRA deadlines"
+                ])
+            else:
+                recommendations.extend([
+                    "Schedule a benefits consultation for personalized guidance",
+                    "Review your current benefits elections",
+                    "Consider any upcoming life changes",
+                    "Keep your benefits information up to date",
+                    "Document your healthcare expenses"
+                ])
+            
+            # Add wellness-based recommendations if profile has wellness data
+            if profile.get('wellness_data', {}).get('risk_factors'):
+                recommendations.extend([
+                    "Consider using HSA/FSA funds for preventive care",
+                    "Review coverage for wellness programs",
+                    "Track health-related expenses for tax purposes"
+                ])
+            
+            # Ensure all recommendations are strings
+            return [str(rec) for rec in recommendations]
+            
+        except Exception as e:
+            print(f"Error in _get_recommendations: {str(e)}")
+            return ["Schedule a benefits consultation for personalized guidance"]
 
-    def _get_action_items(self, query: str, profile: Dict) -> List[str]:
-        """Generate specific action items based on the query and profile."""
-        query = query.upper()
-        if "FSA" in query and "REIMBURSEMENT" in query:
-            return [
-                "Collect all receipts and supporting documentation",
-                "Verify each receipt shows date, provider, service, and amount paid",
-                "Complete the reimbursement form with accurate information",
-                "Make copies or scans of all documentation before submitting",
-                "Note your claim confirmation number for future reference"
-            ]
-        elif "FSA" in query and "CONTRIBUTION" in query:
-            return [
-                "Calculate your expected healthcare expenses for the year",
-                "Review the current FSA contribution limits",
-                "Check for any qualifying life events that allow changes",
-                "Document the reason for your contribution change request",
-                "Submit your change request through the proper channels"
-            ]
-        elif "FSA" in query:
-            return [
-                "Review your current FSA balance",
-                "Check your remaining deadline for using funds",
-                "List any upcoming eligible expenses",
-                "Verify your FSA card is active",
-                "Update your contact information if needed"
-            ]
-        return []
+    def _get_action_items(self, query: str, profile: Optional[Dict] = None) -> List[str]:
+        """
+        Generate specific action items based on the query and profile.
+        
+        Args:
+            query: The query string to analyze.
+            profile: Optional profile data.
+            
+        Returns:
+            List[str]: List of action items.
+        """
+        try:
+            query = query.lower()
+            action_items = []
+            
+            if "fsa" in query and "reimbursement" in query:
+                action_items = [
+                    "Collect all receipts and supporting documentation",
+                    "Verify each receipt shows date, provider, service, and amount paid",
+                    "Complete the reimbursement form with accurate information",
+                    "Make copies or scans of all documentation before submitting",
+                    "Note your claim confirmation number for future reference"
+                ]
+            elif "fsa" in query and "contribution" in query:
+                action_items = [
+                    "Calculate your expected healthcare expenses for the year",
+                    "Review the current FSA contribution limits",
+                    "Check for any qualifying life events that allow changes",
+                    "Document the reason for your contribution change request",
+                    "Submit your change request through the proper channels"
+                ]
+            elif "fsa" in query:
+                action_items = [
+                    "Review your current FSA balance",
+                    "Check your remaining deadline for using funds",
+                    "List any upcoming eligible expenses",
+                    "Verify your FSA card is active",
+                    "Update your contact information if needed"
+                ]
+            elif "hsa" in query and "contribution" in query:
+                action_items = [
+                    "Verify your HDHP enrollment status",
+                    "Review current HSA contribution limits",
+                    "Calculate your maximum allowable contribution",
+                    "Set up or adjust payroll deductions",
+                    "Consider catch-up contributions if eligible"
+                ]
+            elif "hsa" in query:
+                action_items = [
+                    "Check your HSA balance",
+                    "Review investment options if available",
+                    "List upcoming qualified medical expenses",
+                    "Verify your HSA debit card is active",
+                    "Update your beneficiary information"
+                ]
+            elif "cobra" in query:
+                action_items = [
+                    "Review COBRA election notice",
+                    "Compare COBRA premium costs",
+                    "Check election deadline dates",
+                    "Gather required documentation",
+                    "Consider alternative coverage options"
+                ]
+            else:
+                action_items = [
+                    "Review your benefits documentation",
+                    "Contact HR for clarification if needed",
+                    "Update your personal information",
+                    "Schedule a follow-up if necessary"
+                ]
+            
+            return [str(item) for item in action_items]
+            
+        except Exception as e:
+            print(f"Error in _get_action_items: {str(e)}")
+            return ["Review your benefits documentation", "Contact HR for clarification if needed"]
 
     def _get_next_steps(self, text: str) -> List[str]:
-        """Generate next steps based on the query text."""
-        text = text.upper()
-        if "FSA" in text and "REIMBURSEMENT" in text:
-            return [
-                "Access your FSA account portal or mobile app",
-                "Select the reimbursement claim option",
-                "Enter expense details and upload documentation",
-                "Review all information for accuracy",
-                "Submit your claim and save the confirmation"
-            ]
-        elif "FSA" in text and "CONTRIBUTION" in text:
-            return [
-                "Log into your benefits portal",
-                "Navigate to FSA settings",
-                "Enter your desired contribution change",
-                "Provide any required documentation",
-                "Submit your request for approval"
-            ]
-        elif "FSA" in text:
-            return [
-                "Review your FSA plan details",
-                "Check your current balance",
-                "List your upcoming expenses",
-                "Gather necessary documentation",
-                "Contact FSA administrator with questions"
-            ]
-        elif "HSA" in text:
-            return [
-                "Review your HSA plan details",
-                "Check your current balance",
-                "Consider your contribution strategy",
-                "Review investment options if available",
-                "Contact HSA administrator with questions"
-            ]
-        return ["Schedule a benefits consultation for personalized guidance"]
+        """
+        Extract next steps from the response text.
+        
+        Args:
+            text: The response text to analyze.
+            
+        Returns:
+            List[str]: List of next steps.
+        """
+        next_steps = []
+        if "next steps:" in text.lower():
+            section = text.lower().split("next steps:")[1].split("\n")
+            for line in section:
+                line = line.strip()
+                if line and (line.startswith("-") or line.startswith("*")):
+                    next_steps.append(line[1:].strip())
+                elif any(marker in line.lower() for marker in ["recommendations:", "action items:"]):
+                    break
+        
+        # Default next steps if none found
+        if not next_steps:
+            if "hsa" in text.lower() and "fsa" in text.lower():
+                next_steps = [
+                    "Review your HSA and FSA eligibility status",
+                    "Compare contribution limits and rollover rules",
+                    "Consider your healthcare spending patterns",
+                    "Consult with HR about enrollment options"
+                ]
+            elif "hsa" in text.lower():
+                next_steps = [
+                    "Check your HDHP enrollment status",
+                    "Review HSA contribution limits",
+                    "Consider catch-up contributions if eligible",
+                    "Set up automatic HSA contributions"
+                ]
+            elif "fsa" in text.lower():
+                next_steps = [
+                    "Review FSA eligible expenses",
+                    "Plan your annual FSA contribution",
+                    "Set up FSA reimbursement process",
+                    "Track FSA spending deadlines"
+                ]
+            elif "cobra" in text.lower():
+                next_steps = [
+                    "Review COBRA eligibility requirements",
+                    "Compare COBRA costs with alternatives",
+                    "Check election deadlines",
+                    "Gather required documentation"
+                ]
+            else:
+                next_steps = [
+                    "Review your benefits documentation",
+                    "Schedule a benefits consultation",
+                    "Update your benefits preferences",
+                    "Contact HR for additional guidance"
+                ]
+        
+        return [str(step) for step in next_steps]
     
     def _calculate_age(self, dob_str: str) -> int:
         """Calculate age from date of birth string."""
@@ -495,62 +590,97 @@ class ManagerAgent:
         except:
             return "N/A"
     
-    def _format_response(self, analysis_result: str, debug_info: List[Dict] = None) -> Dict[str, Any]:
+    def _format_response(self, analysis_result: str, debug_info: List[Dict] = None, action_items: List[str] = None) -> Dict[str, Any]:
         """
         Format the analysis result into a structured response.
         
         Args:
             analysis_result: Raw analysis result string.
             debug_info: List of debug entries from agents.
+            action_items: List of action items.
             
         Returns:
             Dict[str, Any]: Formatted response with message, details, and next steps.
         """
-        # Extract components using string parsing
-        thought_match = re.search(r"Thought:(.*?)(?=Reasoning:|$)", analysis_result, re.DOTALL)
-        reasoning_match = re.search(r"Reasoning:(.*?)(?=Final Answer:|$)", analysis_result, re.DOTALL)
-        answer_match = re.search(r"Final Answer:(.*?)$", analysis_result, re.DOTALL)
-        
-        thought = thought_match.group(1).strip() if thought_match else ""
-        reasoning = reasoning_match.group(1).strip() if reasoning_match else ""
-        answer = answer_match.group(1).strip() if answer_match else analysis_result.strip()
-        
-        # Add final thought to debug info
-        if debug_info is None:
-            debug_info = []
+        try:
+            # Extract components using string parsing
+            thought_match = re.search(r"Thought:(.*?)(?=Reasoning:|$)", analysis_result, re.DOTALL)
+            reasoning_match = re.search(r"Reasoning:(.*?)(?=Final Answer:|$)", analysis_result, re.DOTALL)
+            answer_match = re.search(r"Final Answer:(.*?)$", analysis_result, re.DOTALL)
             
-        debug_info.append({
-            "agent": "Response Formatter",
-            "timestamp": datetime.now().isoformat(),
-            "thought": thought,
-            "reasoning": reasoning,
-            "result": "Response formatted successfully"
-        })
-        
-        # Extract recommendations and action items
-        recommendations = self._extract_recommendations(answer)
-        action_items = self._extract_action_items(answer)
-        
-        # Get next steps based on the answer text
-        next_steps = self._get_next_steps(answer)
-        
-        return {
-            "response": {
-                "message": answer,
-                "details": {
-                    "recommendations": recommendations,
-                    "action_items": action_items
+            thought = thought_match.group(1).strip() if thought_match else ""
+            reasoning = reasoning_match.group(1).strip() if reasoning_match else ""
+            answer = answer_match.group(1).strip() if answer_match else analysis_result.strip()
+            
+            # Initialize debug_info if None
+            if debug_info is None:
+                debug_info = []
+                
+            # Convert any non-string values in debug_info to strings
+            sanitized_debug_info = []
+            for entry in debug_info:
+                if not isinstance(entry, dict):
+                    continue
+                sanitized_entry = {
+                    "agent": str(entry.get("agent", "Unknown")),
+                    "timestamp": str(entry.get("timestamp", datetime.now().isoformat())),
+                    "action": str(entry.get("action", "")),
+                    "thought": str(entry.get("thought", "")),
+                    "reasoning": str(entry.get("reasoning", "")),
+                    "result": str(entry.get("result", ""))
                 }
-            },
-            "next_steps": next_steps,
-            "debug_info": debug_info
-        }
+                sanitized_debug_info.append(sanitized_entry)
+                
+            # Add final thought to debug info if thought exists
+            if thought or reasoning:
+                sanitized_debug_info.append({
+                    "agent": "Response Formatter",
+                    "timestamp": str(datetime.now().isoformat()),
+                    "action": "Format Response",
+                    "thought": str(thought) if thought else "No thought provided",
+                    "reasoning": str(reasoning) if reasoning else "No reasoning provided",
+                    "result": "Response formatted successfully"
+                })
+            
+            # Extract recommendations and action items
+            recommendations = self._extract_recommendations(answer)
+            if action_items is None:
+                action_items = self._extract_action_items(answer)
+            
+            # Get next steps based on the answer text
+            next_steps = self._get_next_steps(answer)
+            
+            # Ensure all lists contain only strings
+            recommendations = [str(r) for r in recommendations]
+            action_items = [str(a) for a in action_items]
+            next_steps = [str(s) for s in next_steps]
+            
+            # Create the response dictionary with all values as strings
+            response = {
+                "response": {
+                    "message": str(answer),
+                    "details": {
+                        "recommendations": recommendations,
+                        "action_items": action_items
+                    }
+                },
+                "next_steps": next_steps,
+                "debug_info": sanitized_debug_info
+            }
+            
+            # Convert to JSON and back to ensure all values are serializable
+            return json.loads(json.dumps(response))
+            
+        except Exception as e:
+            # If any error occurs during formatting, return an empty response with error message
+            return self._format_empty_response(f"An error occurred while processing your request: {str(e)}")
 
     def _format_empty_response(self, message: str) -> Dict[str, Any]:
         """Format an empty response with the given message."""
+        timestamp = str(datetime.now().isoformat())
         return {
             "response": {
-                "message": message,
+                "message": str(message),
                 "details": {
                     "recommendations": [],
                     "action_items": []
@@ -559,37 +689,157 @@ class ManagerAgent:
             "next_steps": ["Please provide more information about your benefits scenario"],
             "debug_info": [{
                 "agent": "Manager Agent",
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": timestamp,
                 "action": "Empty Response",
-                "result": message
+                "thought": "Error occurred during processing",
+                "reasoning": "Need to provide error message",
+                "result": str(message)
             }]
         }
 
     def _extract_recommendations(self, text: str) -> List[str]:
-        """Extract recommendations from the response text."""
-        recommendations = []
-        if "recommendations:" in text.lower():
-            section = text.lower().split("recommendations:")[1].split("\n")
-            for line in section:
-                line = line.strip()
-                if line and (line.startswith("-") or line.startswith("*")):
-                    recommendations.append(line[1:].strip())
-                elif "action items:" in line.lower() or "next steps:" in line.lower():
-                    break
-        return recommendations or ["Schedule a benefits consultation for personalized guidance"]
+        """
+        Extract recommendations from the response text.
         
+        Args:
+            text: The response text to analyze.
+            
+        Returns:
+            List[str]: List of recommendations.
+        """
+        print("\n=== Starting _extract_recommendations ===")
+        recommendations = []
+        try:
+            print("\nStep 1: Looking for recommendations section...")
+            if "recommendations:" in text.lower():
+                print("Found recommendations section")
+                section = text.lower().split("recommendations:")[1].split("\n")
+                print(f"Found {len(section)} lines in section")
+                
+                for line in section:
+                    line = line.strip()
+                    if line and (line.startswith("-") or line.startswith("*")):
+                        clean_line = line[1:].strip()
+                        if clean_line:
+                            print(f"Adding recommendation: {clean_line[:50]}...")
+                            recommendations.append(clean_line)
+                    elif any(marker in line.lower() for marker in ["action items:", "next steps:"]):
+                        print("Found end of recommendations section")
+                        break
+            
+            print(f"\nStep 2: Found {len(recommendations)} recommendations from text")
+            
+            # Default recommendations if none found
+            if not recommendations:
+                print("\nNo recommendations found, using defaults based on context...")
+                if "hsa" in text.lower() and "fsa" in text.lower():
+                    print("Using HSA/FSA comparison defaults")
+                    recommendations = [
+                        "Compare HSA and FSA features based on your healthcare needs",
+                        "Review contribution limits for both accounts",
+                        "Consider your eligibility status for each account",
+                        "Evaluate your expected healthcare expenses"
+                    ]
+                elif "hsa" in text.lower():
+                    print("Using HSA defaults")
+                    recommendations = [
+                        "Verify your HDHP enrollment status",
+                        "Review HSA contribution strategies",
+                        "Consider investment options if available",
+                        "Track qualified medical expenses"
+                    ]
+                elif "fsa" in text.lower():
+                    print("Using FSA defaults")
+                    recommendations = [
+                        "Plan your FSA contributions carefully",
+                        "Review FSA-eligible expenses",
+                        "Track FSA deadlines and grace periods",
+                        "Keep all receipts for reimbursement"
+                    ]
+                else:
+                    print("Using general defaults")
+                    recommendations = [
+                        "Schedule a benefits consultation for personalized guidance",
+                        "Review your current benefits elections",
+                        "Consider any upcoming life changes",
+                        "Keep your benefits information up to date"
+                    ]
+                print(f"Added {len(recommendations)} default recommendations")
+        except Exception as e:
+            print(f"\nError in _extract_recommendations: {str(e)}")
+            print(f"Error type: {type(e)}")
+            print(f"Error details: {e.__dict__ if hasattr(e, '__dict__') else 'No details'}")
+            recommendations = ["Schedule a benefits consultation for personalized guidance"]
+        
+        print("\nStep 3: Converting recommendations to strings...")
+        string_recommendations = []
+        for rec in recommendations:
+            try:
+                string_recommendations.append(str(rec))
+                print(f"Successfully converted: {str(rec)[:50]}...")
+            except Exception as e:
+                print(f"Error converting recommendation to string: {str(e)}")
+        
+        print(f"\nReturning {len(string_recommendations)} recommendations")
+        return string_recommendations
+
     def _extract_action_items(self, text: str) -> List[str]:
-        """Extract action items from the response text."""
+        """
+        Extract action items from the response text.
+        
+        Args:
+            text: The response text to analyze.
+            
+        Returns:
+            List[str]: List of action items.
+        """
         action_items = []
-        if "action items:" in text.lower():
-            section = text.lower().split("action items:")[1].split("\n")
-            for line in section:
-                line = line.strip()
-                if line and (line.startswith("-") or line.startswith("*")):
-                    action_items.append(line[1:].strip())
-                elif "next steps:" in line.lower():
-                    break
-        return action_items or ["Review your benefits documentation", "Contact HR for clarification if needed"] 
+        try:
+            if "action items:" in text.lower():
+                section = text.lower().split("action items:")[1].split("\n")
+                for line in section:
+                    line = line.strip()
+                    if line and (line.startswith("-") or line.startswith("*")):
+                        clean_line = line[1:].strip()
+                        if clean_line:
+                            action_items.append(clean_line)
+                    elif "next steps:" in line.lower():
+                        break
+            
+            # Default action items if none found
+            if not action_items:
+                if "hsa" in text.lower() and "fsa" in text.lower():
+                    action_items = [
+                        "Review current benefits enrollment status",
+                        "Calculate potential contributions for each account",
+                        "Document expected medical expenses",
+                        "Schedule benefits consultation if needed"
+                    ]
+                elif "hsa" in text.lower():
+                    action_items = [
+                        "Verify HDHP enrollment",
+                        "Set up HSA contributions",
+                        "Review investment options",
+                        "Organize medical expense records"
+                    ]
+                elif "fsa" in text.lower():
+                    action_items = [
+                        "Calculate FSA contribution needs",
+                        "Submit FSA enrollment form",
+                        "Set up FSA payment card",
+                        "Create FSA expense tracking system"
+                    ]
+                else:
+                    action_items = [
+                        "Review benefits documentation",
+                        "Contact HR for clarification if needed",
+                        "Update personal information",
+                        "Schedule follow-up if necessary"
+                    ]
+        except Exception:
+            action_items = ["Review your benefits documentation", "Contact HR for clarification if needed"]
+        
+        return [str(item) for item in action_items]
 
     async def route_query(self, query: str, context: Optional[Dict] = None) -> Dict[str, Any]:
         """

@@ -25,7 +25,12 @@ class SupabaseClient:
             if not supabase_url or not supabase_key:
                 raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set in environment variables")
             
-            self._client = create_client(supabase_url, supabase_key)
+            try:
+                self._client = create_client(supabase_url, supabase_key)
+                print("Supabase client initialized successfully")
+            except Exception as e:
+                print(f"Error initializing Supabase client: {str(e)}")
+                raise
     
     @property
     def client(self) -> Client:

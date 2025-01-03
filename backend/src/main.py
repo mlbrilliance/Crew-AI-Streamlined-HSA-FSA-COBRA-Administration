@@ -22,21 +22,36 @@ from dotenv import load_dotenv, find_dotenv
 import traceback
 import logging
 from typing import List, Dict, Any, Optional
+from pathlib import Path
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+# Load environment variables with explicit path
+backend_dir = Path(__file__).resolve().parent.parent
+env_path = backend_dir / '.env'
+
+print(f"Debug - Looking for .env file at: {env_path}")
+print(f"Debug - File exists: {env_path.exists()}")
+
 # Load environment variables
-load_dotenv(find_dotenv())
+from dotenv import load_dotenv
+load_dotenv(dotenv_path=env_path)
 
 # Get API key and print debug info
 openai_api_key = os.getenv("OPENAI_API_KEY")
 print(f"Debug - Main - API Key exists: {bool(openai_api_key)}")
 print(f"Debug - Main - API Key length: {len(openai_api_key) if openai_api_key else 0}")
 print(f"Debug - Main - Current working directory: {os.getcwd()}")
+print(f"Debug - Main - Environment variables loaded: {list(os.environ.keys())}")
 
 if not openai_api_key:
+    print("Error: OPENAI_API_KEY not found in environment variables")
+    print(f"Debug - Contents of .env file (if exists):")
+    if env_path.exists():
+        with open(env_path) as f:
+            print(f.read())
     raise ValueError("OPENAI_API_KEY environment variable is not set")
 
 app = FastAPI(
@@ -48,7 +63,7 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # Allow frontend origin
+    allow_origins=["*"],  # Allow all origins in development
     allow_credentials=True,
     allow_methods=["*"],  # Allow all methods
     allow_headers=["*"],  # Allow all headers

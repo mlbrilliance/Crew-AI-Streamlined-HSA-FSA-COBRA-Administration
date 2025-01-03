@@ -6,10 +6,14 @@ def init_database():
     """Initialize the database with required tables if they don't exist."""
     load_dotenv()
     supabase_url = os.getenv("SUPABASE_URL")
-    supabase_key = os.getenv("SUPABASE_KEY")
+    supabase_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
     
     if not supabase_url or not supabase_key:
-        raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set in environment variables")
+        raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in environment variables")
+        
+    print(f"Debug - Supabase URL: {supabase_url}")
+    print(f"Debug - Service Role Key exists: {bool(supabase_key)}")
+    print(f"Debug - Service Role Key length: {len(supabase_key) if supabase_key else 0}")
         
     supabase: Client = create_client(supabase_url, supabase_key)
     
@@ -178,6 +182,30 @@ def init_database():
         """
     ]
     
+    # Create RLS policies
+    policies = [
+        """
+        alter table mock_employees enable row level security;
+        create policy "Enable read access for authenticated users"
+        on mock_employees for select
+        using (auth.role() = 'authenticated');
+        
+        create policy "Enable insert for service role"
+        on mock_employees for insert
+        with check (auth.role() = 'service_role');
+        """,
+        """
+        alter table mock_wellness_data enable row level security;
+        create policy "Enable read access for authenticated users"
+        on mock_wellness_data for select
+        using (auth.role() = 'authenticated');
+        
+        create policy "Enable insert for service role"
+        on mock_wellness_data for insert
+        with check (auth.role() = 'service_role');
+        """
+    ]
+    
     try:
         # Create tables
         for table_sql in tables:
@@ -193,6 +221,14 @@ def init_database():
                 supabase.postgrest.rpc('run_sql', {'sql': view_sql}).execute()
             except Exception as e:
                 print(f"Error creating view: {str(e)}")
+                continue
+                
+        # Apply RLS policies
+        for policy_sql in policies:
+            try:
+                supabase.postgrest.rpc('run_sql', {'sql': policy_sql}).execute()
+            except Exception as e:
+                print(f"Error creating policy: {str(e)}")
                 continue
             
         print("Database initialization completed successfully")

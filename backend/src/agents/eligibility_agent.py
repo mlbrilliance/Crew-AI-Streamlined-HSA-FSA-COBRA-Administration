@@ -14,12 +14,17 @@ Developer:
 from typing import Dict, Any, List, Optional
 from crewai import Agent
 from ..repositories.data_repository import DataRepository
+from .wellness_agent import WellnessAgent
 import os
 from dotenv import load_dotenv, find_dotenv
 from langchain_openai import ChatOpenAI
+from pydantic import PrivateAttr
 
 class EligibilityAgent(Agent):
     """Agent responsible for analyzing benefits eligibility and providing recommendations."""
+    
+    _wellness_agent: WellnessAgent = PrivateAttr()
+    _data_repo: DataRepository = PrivateAttr()
     
     def __init__(self):
         """Initialize the EligibilityAgent."""
@@ -50,7 +55,11 @@ class EligibilityAgent(Agent):
                 api_key=openai_api_key
             )
         )
-    
+        
+        # Initialize private attributes
+        self._wellness_agent = WellnessAgent()
+        self._data_repo = DataRepository()
+
     async def analyze_benefits_scenario(self, employee_id: str, query: str) -> Dict[str, Any]:
         """
         Analyze a benefits scenario for an employee and provide recommendations.
@@ -62,34 +71,37 @@ class EligibilityAgent(Agent):
         Returns:
             Dict[str, Any]: Analysis results including eligibility status and recommendations.
         """
-        # Create data repository instance
-        data_repo = DataRepository()
-        
-        # Gather comprehensive employee data
-        profile = data_repo.get_employee_profile(employee_id)
-        if not profile:
-            return self._format_empty_response("Employee not found")
+        try:
+            # Get current benefits status
+            benefits_status = self._data_repo.get_employee_benefits_status(employee_id)
             
-        # Get current benefits status
-        benefits_status = data_repo.get_employee_benefits_status(employee_id)
-        
-        # Get health risk assessment if available
-        risk_assessment = data_repo.get_employee_risk_assessment(employee_id)
-        
-        # Search for relevant policies
-        relevant_policies = data_repo.get_relevant_policies(query)
-        
-        # Analyze the scenario
-        analysis = await self._analyze_scenario(
-            query=query,
-            profile=profile,
-            benefits_status=benefits_status,
-            risk_assessment=risk_assessment,
-            relevant_policies=relevant_policies
-        )
-        
-        return analysis
-    
+            # Get employee profile
+            profile = self._data_repo.get_employee_profile(employee_id)
+            if not profile:
+                return self._format_empty_response("Employee not found")
+            
+            # Get wellness data using WellnessAgent
+            wellness_analysis = await self._wellness_agent.get_wellness_analysis(employee_id)
+            risk_assessment = wellness_analysis["wellness_data"]
+            
+            # Search for relevant policies
+            relevant_policies = self._data_repo.get_relevant_policies(query)
+            
+            # Analyze the scenario
+            analysis = await self._analyze_scenario(
+                query=query,
+                profile=profile,
+                benefits_status=benefits_status,
+                risk_assessment=risk_assessment,
+                relevant_policies=relevant_policies
+            )
+            
+            return analysis
+            
+        except Exception as e:
+            print(f"Error in analyze_benefits_scenario: {str(e)}")
+            return self._format_empty_response(f"Error analyzing benefits scenario: {str(e)}")
+
     async def _analyze_scenario(
         self,
         query: str,
@@ -119,17 +131,8 @@ class EligibilityAgent(Agent):
         claims = profile.get("claims", [])
         life_events = profile.get("life_events", [])
         
-        # Get health metrics
-        health_metrics = risk_assessment.get("metrics", {})
-        stress_level = health_metrics.get("stress_level", "N/A")
-        sleep_hours = health_metrics.get("sleep_hours", "N/A")
-        exercise_minutes = health_metrics.get("exercise_minutes", "N/A")
-        heart_rate = health_metrics.get("heart_rate", "N/A")
-        risk_factors = risk_assessment.get("risk_factors", [])
-        consent_status = risk_assessment.get("consent_status", "not_provided")
-        
-        # Get policy details
-        policy_details = relevant_policies[0]["policy_text"] if relevant_policies else "No specific policy details available."
+        # Get health metrics from risk assessment
+        metrics = risk_assessment.get("metrics", {})
         
         # Execute the analysis using the agent's capabilities
         result = await self.execute(
@@ -147,12 +150,13 @@ class EligibilityAgent(Agent):
             - Life Events: {len(life_events)}
             
             Health Profile:
-            - Stress Level: {stress_level}/10
-            - Sleep Hours: {sleep_hours} hours/night
-            - Exercise: {exercise_minutes} minutes/day
-            - Heart Rate: {heart_rate} bpm
-            - Risk Factors: {', '.join(risk_factors) if risk_factors else 'None identified'}
-            - Health Data Consent: {consent_status}
+            - Stress Level: {metrics.get('stress_level', 'N/A')}/10
+            - Sleep Hours: {metrics.get('sleep_hours', 'N/A')} hours/night
+            - Exercise: {metrics.get('exercise_minutes', 'N/A')} minutes/day
+            - Daily Steps: {metrics.get('daily_steps', 'N/A')} steps
+            - Heart Rate: {metrics.get('heart_rate', 'N/A')} bpm
+            - Risk Factors: {', '.join(str(factor) for factor in risk_assessment.get('risk_factors', [])) if risk_assessment.get('risk_factors', []) else 'None identified'}
+            - Health Recommendations: {', '.join(str(r) for r in risk_assessment.get('recommendations', [])) if risk_assessment.get('recommendations', []) else 'None available'}
             
             Current Benefits Status:
             - HSA Eligible: {benefits_status.get('hsa_eligible')}
@@ -160,7 +164,7 @@ class EligibilityAgent(Agent):
             - COBRA Status: {benefits_status.get('cobra_status')}
             
             Policy Details:
-            {policy_details}
+            {relevant_policies[0]["policy_text"] if relevant_policies else "No specific policy details available."}
             
             Based on this comprehensive information, provide a detailed analysis with the following sections:
 
@@ -189,18 +193,7 @@ class EligibilityAgent(Agent):
         
         # Parse and structure the analysis result
         return self._format_response(result)
-    
-    def _calculate_age(self, dob_str: str) -> int:
-        """Calculate age from date of birth string."""
-        from datetime import datetime
-        try:
-            dob = datetime.strptime(dob_str, "%Y-%m-%d")
-            today = datetime.now()
-            age = today.year - dob.year - ((today.month, today.day) < (dob.month, dob.day))
-            return age
-        except:
-            return "N/A"
-    
+
     def _create_analysis_context(
         self,
         query: str,
@@ -253,7 +246,7 @@ class EligibilityAgent(Agent):
         Relevant Policies:
         {self._format_policies(relevant_policies)}
         """
-        
+
         return context
 
     def _format_dependents(self, dependents: List[Dict[str, Any]]) -> str:
@@ -293,17 +286,21 @@ class EligibilityAgent(Agent):
             
         metrics = assessment.get("metrics", {})
         risk_factors = assessment.get("risk_factors", [])
+        recommendations = assessment.get("recommendations", [])
         
         return f"""
         Metrics:
         - Stress Level: {metrics.get('stress_level', 'N/A')}
         - Sleep Hours: {metrics.get('sleep_hours', 'N/A')}
         - Exercise Minutes: {metrics.get('exercise_minutes', 'N/A')}
+        - Daily Steps: {metrics.get('daily_steps', 'N/A')}
         - Heart Rate: {metrics.get('heart_rate', 'N/A')}
         
         Risk Factors: {', '.join(risk_factors) if risk_factors else 'None identified'}
+        
+        Recommendations: {', '.join(recommendations) if recommendations else 'None available'}
         """
-    
+
     def _format_policies(self, policies: List[Dict[str, Any]]) -> str:
         """Format policy information."""
         if not policies:
@@ -312,8 +309,8 @@ class EligibilityAgent(Agent):
         return "\n".join([
             f"- {policy.get('policy_name')} (Version {policy.get('version')})"
             for policy in policies
-        ]) 
-    
+        ])
+
     def _format_response(self, analysis_result: str) -> Dict[str, Any]:
         """
         Format the analysis result into a structured response.
@@ -363,27 +360,30 @@ class EligibilityAgent(Agent):
             elif current_section == "policies":
                 if line.startswith("-"):
                     policy_considerations.append(line[1:].strip())
-        
+
         return {
             "eligibility_status": eligibility_status.strip(),
             "recommendations": recommendations,
             "action_items": action_items,
             "policy_considerations": policy_considerations
         }
-    
+
     def _format_empty_response(self, message: str) -> Dict[str, Any]:
-        """
-        Format an empty response with an error message.
-        
-        Args:
-            message: Error message to include.
-            
-        Returns:
-            Dict[str, Any]: Empty response structure.
-        """
+        """Format an empty response with the given message."""
         return {
             "eligibility_status": message,
             "recommendations": [],
             "action_items": [],
             "policy_considerations": []
-        } 
+        }
+
+    def _calculate_age(self, dob: str) -> int:
+        """Calculate age from date of birth."""
+        from datetime import datetime
+        try:
+            birth_date = datetime.strptime(dob, "%Y-%m-%d")
+            today = datetime.now()
+            age = today.year - birth_date.year - ((today.month, today.day) < (birth_date.month, birth_date.day))
+            return age
+        except (ValueError, TypeError):
+            return 0 
