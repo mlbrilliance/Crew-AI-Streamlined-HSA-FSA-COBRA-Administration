@@ -1,6 +1,6 @@
-# HSA/FSA/COBRA Administration System
+# Benefits Administration System
 
-An AI-powered benefits administration system using CrewAI agents for intelligent analysis and recommendations. The system provides real-time, personalized guidance on benefits-related queries through a sophisticated multi-agent architecture.
+A comprehensive benefits administration system with intelligent analysis and recommendations, powered by CrewAI and OpenAI.
 
 ## Developer
 - **Name**: Nick Sudh
@@ -11,96 +11,79 @@ An AI-powered benefits administration system using CrewAI agents for intelligent
 
 ## Features
 
-### Interactive Chat Interface
-- Real-time conversational interface for benefits inquiries
-- Personalized responses based on employee profile and context
-- Visual agent activity tracking through "CrewAI Agents Activity" popup
-- Detailed explanation of agent thought processes and decision-making
+### Frontend (Next.js + TypeScript)
+- Modern, responsive UI built with Next.js 14
+- Real-time chat interface with streaming responses
+- Tailwind CSS for styling
+- Shadcn/ui components for consistent design
+- TypeScript for type safety
+- Supabase for authentication and data persistence
 
-### Agent System Architecture
+### Backend (FastAPI + CrewAI)
+- Multi-agent system for intelligent benefits analysis
+- FastAPI for high-performance API endpoints
+- CrewAI for agent orchestration
+- OpenAI integration for natural language processing
+- Supabase for data storage and retrieval
+- Comprehensive error handling and logging
 
-#### 1. Manager Agent (Supervisor)
-- Orchestrates the entire conversation flow
-- Coordinates specialized sub-agents
-- Manages context and employee profiles
-- Provides final, synthesized responses
-
-#### 2. Specialized Agents
-- **Query Analyzer**: Classifies and interprets user questions
-- **Context Agent**: Manages employee profiles and historical data
-- **Policy Agent**: Researches and applies relevant policy guidelines
-- **Wellness Agent**: Analyzes health metrics and risk factors
-- **Benefits Expert**: Generates personalized recommendations
-- **Response Analyzer**: Ensures quality and completeness of responses
-
-### Data Integration
-- Real-time employee profile access
-- Benefits eligibility tracking
-- Wellness metrics monitoring
-- Policy database integration
-- Chat history persistence
-
-### Analytics and Monitoring
-- Agent activity visualization
-- Decision-making process transparency
-- Real-time debug information
-- Response quality tracking
-
-## Technical Stack
+## Tech Stack
 
 ### Frontend
-- Next.js with TypeScript
-- Tailwind CSS for styling
-- React state management
-- WebSocket for real-time updates
+- Next.js 14
+- TypeScript
+- Tailwind CSS
+- Shadcn/ui
+- React Hooks
+- Supabase Client
 
 ### Backend
-- FastAPI for API endpoints
-- CrewAI for agent orchestration
-- OpenAI GPT for natural language processing
-- Supabase for data persistence
+- FastAPI
+- CrewAI
+- OpenAI
+- Supabase
+- Python 3.11+
+- Uvicorn
 
-## Setup Instructions
+## Setup
 
 ### Prerequisites
-- Node.js 18+ for frontend
-- Python 3.10+ for backend
+- Node.js 18+
+- Python 3.11+
+- Supabase account
 - OpenAI API key
-- Supabase account and credentials
 
 ### Frontend Setup
-1. Navigate to the frontend directory:
-```bash
-cd frontend
-```
-
-2. Install dependencies:
+1. Install dependencies:
 ```bash
 npm install
 ```
 
-3. Create `.env.local`:
+2. Create `.env.local`:
 ```env
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_key
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
 ```
 
-4. Start the development server:
+3. Run development server:
 ```bash
 npm run dev
 ```
 
 ### Backend Setup
-1. Navigate to the backend directory:
+1. Create Python virtual environment:
 ```bash
 cd backend
+python -m venv venv
 ```
 
-2. Create and activate virtual environment:
+2. Activate virtual environment:
 ```bash
-python -m venv venv
-source venv/bin/activate  # Unix/MacOS
-.\venv\Scripts\activate   # Windows
+# Windows
+.\venv\Scripts\activate
+
+# Unix/MacOS
+source venv/bin/activate
 ```
 
 3. Install dependencies:
@@ -110,43 +93,84 @@ pip install -r requirements.txt
 
 4. Create `.env`:
 ```env
+# OpenAI Configuration
 OPENAI_API_KEY=your_openai_api_key
+
+# Supabase Configuration
 SUPABASE_URL=your_supabase_url
-SUPABASE_KEY=your_supabase_key
+SUPABASE_KEY=your_supabase_anon_key
+
+# Server Configuration
+HOST=0.0.0.0
+PORT=8000
+DEBUG=True
+
+# LLM Configuration
+MODEL_NAME=gpt-4
+TEMPERATURE=0
 ```
 
-5. Start the backend server:
+5. Run development server:
 ```bash
 uvicorn src.main:app --reload
 ```
 
-## Usage
+## Project Structure
 
-1. Access the application at `http://localhost:3000`
-2. Log in with employee credentials
-3. Start asking benefits-related questions
-4. Click the "Users" icon to view agent activity
+```
+.
+├── app/                    # Next.js app directory
+├── components/            # React components
+├── lib/                   # Shared utilities
+├── hooks/                # Custom React hooks
+├── backend/              # Python backend
+│   └── src/             # Backend source code
+├── tests/               # Test files
+├── .env.local          # Frontend environment variables
+├── package.json        # Frontend dependencies
+└── README.md          # This file
+```
 
-## Features in Development
+## Development
 
-- ✅ Basic chat interface
-- ✅ Agent activity visualization
-- ✅ Employee profile integration
-- ✅ Policy-based responses
-- ✅ Wellness metrics integration
-- 🔄 Multi-agent collaboration
-- 🔄 Advanced analytics dashboard
-- 🔄 Document upload/processing
-- 🔄 Mobile responsive design
+### Frontend Development
+- Uses Next.js App Router
+- Tailwind CSS for styling
+- TypeScript for type safety
+- ESLint + Prettier for code formatting
+
+### Backend Development
+- FastAPI for API endpoints
+- CrewAI for agent orchestration
+- Comprehensive error handling
+- Type hints and docstrings
+- Pytest for testing
+
+## Testing
+
+### Frontend Tests
+```bash
+npm run test
+```
+
+### Backend Tests
+```bash
+cd backend
+pytest
+```
+
+## API Documentation
+- Swagger UI: http://localhost:8000/docs
+- ReDoc: http://localhost:8000/redoc
 
 ## Contributing
 
 1. Fork the repository
 2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+3. Add tests for new features
+4. Ensure all tests pass
+5. Submit a pull request
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License.

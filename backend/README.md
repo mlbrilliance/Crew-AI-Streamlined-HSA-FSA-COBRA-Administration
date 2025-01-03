@@ -13,24 +13,25 @@ The backend service for the Benefits Administration system, powered by CrewAI an
 
 ### Multi-Agent System
 - **Manager Agent**: Orchestrates the entire conversation flow and coordinates other agents
-- **Query Analyzer**: Classifies and interprets user questions
-- **Context Agent**: Manages employee profiles and historical data
-- **Policy Agent**: Researches and applies relevant policy guidelines
+- **Eligibility Agent**: Analyzes benefits eligibility and provides recommendations
 - **Wellness Agent**: Analyzes health metrics and risk factors
-- **Benefits Expert**: Generates personalized recommendations
-- **Response Analyzer**: Ensures quality and completeness of responses
+- **Policy Agent**: Researches and applies relevant policy guidelines
 
 ### Data Management
-- Employee profile management
-- Benefits eligibility tracking
-- Wellness metrics monitoring
+- Employee profile management with comprehensive data handling
+- Benefits eligibility tracking with error handling
+- Wellness metrics monitoring with string-based data consistency
 - Policy database integration
-- Chat history persistence
+- Chat history persistence with Supabase
+- Life event tracking and recommendations
 
 ### API Endpoints
 - `GET /`: Health check endpoint
 - `POST /manager/analyze`: Main endpoint for benefits analysis
-- `POST /benefits/analyze`: Legacy endpoint for basic benefits analysis
+- `GET /employee/{employee_id}/profile`: Get employee profile
+- `GET /employee/{employee_id}/benefits`: Get benefits status
+- `GET /employee/{employee_id}/wellness`: Get wellness data
+- `GET /employee/{employee_id}/life-events`: Get life event recommendations
 
 ## Dependencies
 
@@ -72,16 +73,21 @@ pip install -r requirements.txt
 
 4. Create a `.env` file:
 ```env
-# Required
+# OpenAI Configuration
 OPENAI_API_KEY=your_openai_api_key
-SUPABASE_URL=your_supabase_url
-SUPABASE_KEY=your_supabase_key
 
-# Optional
+# Supabase Configuration
+SUPABASE_URL=your_supabase_url
+SUPABASE_KEY=your_supabase_anon_key
+
+# Server Configuration
 HOST=0.0.0.0
 PORT=8000
 DEBUG=True
-ENVIRONMENT=development
+
+# LLM Configuration
+MODEL_NAME=gpt-4
+TEMPERATURE=0
 ```
 
 ## Running the Server
@@ -106,15 +112,19 @@ backend/
 │   ├── agents/
 │   │   ├── __init__.py
 │   │   ├── manager_agent.py
-│   │   └── eligibility_agent.py
+│   │   ├── eligibility_agent.py
+│   │   ├── wellness_agent.py
+│   │   └── policy_agent.py
 │   ├── config/
 │   │   ├── __init__.py
-│   │   └── settings.py
+│   │   ├── settings.py
+│   │   └── supabase.py
 │   ├── repositories/
 │   │   ├── __init__.py
 │   │   └── data_repository.py
 │   ├── services/
-│   │   └── __init__.py
+│   │   ├── __init__.py
+│   │   └── database_service.py
 │   ├── __init__.py
 │   └── main.py
 ├── tests/
@@ -137,6 +147,12 @@ backend/
 - Use ruff for linting
 - Use mypy for type checking
 
+### Data Handling
+- All metrics data is stored as strings for consistency
+- Risk factors and recommendations are stored as lists of strings
+- Proper error handling with safe default values
+- Comprehensive logging for debugging
+
 ### Testing
 Run tests using pytest:
 ```bash
@@ -155,14 +171,20 @@ pytest --cov=src tests/
 ## Debugging
 
 ### Logging
-The application uses Python's built-in logging module:
+The application uses Python's built-in logging module with enhanced debugging:
 ```python
 import logging
 logging.basicConfig(level=logging.DEBUG)
 ```
 
 ### Debug Mode
-Set `DEBUG=True` in `.env` for detailed error messages.
+Set `DEBUG=True` in `.env` for detailed error messages and enhanced logging.
+
+### Error Handling
+- All database operations have proper error handling
+- Safe default values are provided for all data types
+- Comprehensive error logging with context
+- Type conversion safety checks
 
 ## Contributing
 
